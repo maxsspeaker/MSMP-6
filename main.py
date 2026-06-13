@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import random
+import re
 import struct
 import sys
 import threading
@@ -10,6 +11,7 @@ import time
 import discordrpc
 from dataclasses import dataclass
 from typing import Optional
+from urllib.parse import parse_qs, urlparse
 
 import yt_dlp
 from dbus_next import Variant
@@ -109,6 +111,123 @@ def is_video_unavailable_error(error: str) -> bool:
 class ResolveSignals(QObject):
     resolved = Signal(int, object)
     failed = Signal(int, str, str)
+
+
+
+class JamPlaylistSignals(QObject):
+    parsed = Signal(int, object, str)
+    failed = Signal(int, str, str)
+
+
+class JamPlaylistTask(QRunnable):
+    def __init__(
+        self,
+        index: int,
+        page_url: str,
+        signals: JamPlaylistSignals,
+        cookie_browser: str = "",
+    ) -> None:
+        super().__init__()
+        self.index = index
+        self.page_url = page_url
+        self.cookie_browser = cookie_browser
+        self.signals = signals
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            video_id = PlayerWindow.extract_youtube_video_id(self.page_url)
+            if not video_id:
+                raise RuntimeError("Не удалось извлечь id видео из page_url")
+
+            jam_url = (
+                "https://www.youtube.com/watch?v="
+                f"{video_id}&list=RD{video_id}&start_radio=1"
+            )
+
+            options = {
+                "quiet": True,
+                "no_warnings": True,
+                "skip_download": True,
+                "extract_flat": True,
+                "noplaylist": False,
+                "nocheckcertificate": True,
+                "retries": 3,
+                "fragment_retries": 3,
+                "logger": YtdlpLogger(),
+            }
+            if self.cookie_browser:
+                options["cookiesfrombrowser"] = (self.cookie_browser,)
+
+            with yt_dlp.YoutubeDL(options) as ydl:
+                data = ydl.extract_info(jam_url, download=False)
+
+            if not isinstance(data, dict):
+                raise RuntimeError("yt-dlp returned an empty or invalid playlist response")
+
+            items: list[PlaylistItem] = []
+            entries = data.get("entries") or []
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+
+                page_url = (
+                    entry.get("webpage_url")
+                    or entry.get("url")
+                    or entry.get("original_url")
+                    or ""
+                )
+
+                if not page_url:
+                    entry_id = str(entry.get("id") or "").strip()
+                    if entry_id:
+                        page_url = f"https://www.youtube.com/watch?v={entry_id}"
+
+                if not page_url:
+                    continue
+
+                items.append(
+                    PlaylistItem(
+                        page_url=str(page_url),
+                        title=str(entry.get("title") or entry.get("name") or page_url),
+                        duration=int(entry.get("duration") or 0),
+                        source_id=str(
+                            entry.get("extractor_key")
+                            or entry.get("extractor")
+                            or "yt-dlp"
+                        ),
+                        uploader=str(entry.get("uploader") or entry.get("channel") or ""),
+                        album=str(entry.get("album") or ""),
+                        artwork_url=str(entry.get("thumbnail") or ""),
+                    )
+                )
+
+            if not items:
+                raise RuntimeError("yt-dlp did not return any playlist items")
+
+            playlist_title = str(data.get("title") or "Jam playlist")
+            self.signals.parsed.emit(self.index, items, playlist_title)
+        except BaseException as exc:
+            error = self.format_error(exc)
+            details = traceback.format_exc()
+            try:
+                self.signals.failed.emit(self.index, error, details)
+            except RuntimeError:
+                print(details, file=sys.stderr, flush=True)
+
+    @staticmethod
+    def format_error(exc: BaseException) -> str:
+        message = str(exc).strip()
+        if isinstance(exc, yt_dlp.utils.DownloadError):
+            message = message.removeprefix("ERROR:").strip()
+        if "HTTP Error 429" in message or "Too Many Requests" in message:
+            return (
+                "HTTP 429 Too Many Requests. Сервис временно ограничил запросы. "
+                "Попробуйте позже или выберите cookies браузера с активной сессией."
+            )
+        if not message:
+            message = exc.__class__.__name__
+        return message
 
 
 class ErrorReporter(QObject):
@@ -735,7 +854,9 @@ class PlayerWindow(QMainWindow):
 
 
         action2 = QAction("Запустить Джем", self)
-        action2.triggered.connect(lambda: print("parse playlist "+self.playlist[self.table.rowAt(position.y())].page_url))
+        action2.triggered.connect(
+            lambda row=index.row(): self.parse_jam_playlist(row)
+        )
         menu.addAction(action2)
 
         action3 = QAction("Открыть расположение", self)
@@ -783,6 +904,9 @@ class PlayerWindow(QMainWindow):
         self.resolve_signals = ResolveSignals()
         self.resolve_signals.resolved.connect(self.on_resolved)
         self.resolve_signals.failed.connect(self.on_resolve_failed)
+        self.jam_signals = JamPlaylistSignals()
+        self.jam_signals.parsed.connect(self.on_jam_playlist_parsed)
+        self.jam_signals.failed.connect(self.on_jam_playlist_failed)
         self.network = QNetworkAccessManager(self)
         self.network.finished.connect(self.on_artwork_loaded)
 
@@ -1010,6 +1134,79 @@ class PlayerWindow(QMainWindow):
         )
         task.setAutoDelete(True)
         self.thread_pool.start(task)
+
+
+    def parse_jam_playlist(self, index: int) -> None:
+        if index < 0 or index >= len(self.playlist):
+            return
+
+        item = self.playlist[index]
+        self.status_label.setText("Parsing Jam playlist...")
+        task = JamPlaylistTask(
+            index,
+            item.page_url,
+            self.jam_signals,
+            self.cookie_browser.currentData() or "",
+        )
+        task.setAutoDelete(True)
+        self.thread_pool.start(task)
+
+    def on_jam_playlist_parsed(
+        self,
+        index: int,
+        items: object,
+        playlist_title: str,
+    ) -> None:
+        if not isinstance(items, list) or not items:
+            self.status_label.setText("Jam playlist is empty")
+            return
+
+        parsed_items = [item for item in items if isinstance(item, PlaylistItem)]
+        if not parsed_items:
+            self.status_label.setText("Jam playlist is empty")
+            return
+
+        self.stop_playback()
+        self.playlist_title = playlist_title or "Jam playlist"
+        self.playlist = parsed_items
+        self.current_index = None
+        self.pending_position = 0
+        self.restart_attempts = 0
+        self.resolving_indexes.clear()
+        self.resolve_autoplay.clear()
+        self.refresh_table()
+        self.emit_mpris_properties_changed("org.mpris.MediaPlayer2.Player", {
+            "CanGoNext": bool(self.playlist),
+            "CanGoPrevious": bool(self.playlist),
+            "CanPlay": bool(self.playlist),
+            "CanSeek": False,
+            "Metadata": self.mpris_metadata(),
+            "PlaybackStatus": "Stopped",
+            "Position": 0,
+        })
+
+        self.status_label.setText(f"Jam playlist loaded: {len(self.playlist)} tracks")
+        if self.playlist:
+            self.play_index(0)
+
+    def on_jam_playlist_failed(self, index: int, error: str, details: str = "") -> None:
+        title = self.playlist[index].page_url if 0 <= index < len(self.playlist) else "item"
+        message = f"Jam parse failed for {title}: {error}"
+        self.status_label.setText(message)
+        console_details = details or message
+        print(console_details, file=sys.stderr, flush=True)
+        logging.error("%s\n%s", message, console_details)
+
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle("Jam parse error")
+        box.setText(error)
+        box.setInformativeText(title)
+        if details:
+            box.setDetailedText(details)
+        self.error_boxes.append(box)
+        box.finished.connect(lambda _result, item=box: self.release_error_box(item))
+        box.open()
 
     def on_resolved(self, index: int, item: PlaylistItem) -> None:
         self.resolving_indexes.discard(index)
@@ -1860,6 +2057,30 @@ class PlayerWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         self.mpris_server.stop()
         super().closeEvent(event)
+
+    @staticmethod
+    def extract_youtube_video_id(page_url: str) -> str:
+        parsed = urlparse(page_url)
+        query_id = parse_qs(parsed.query).get("v", [None])[0]
+        if query_id:
+            return str(query_id).strip()
+
+        path = parsed.path.strip("/")
+        if parsed.netloc in {"youtu.be", "www.youtu.be"} and path:
+            return path.split("/", 1)[0].strip()
+
+        match = re.search(
+            r"(?:v=|/shorts/|/live/|/embed/|youtu\.be/)([A-Za-z0-9_-]{6,})",
+            page_url,
+        )
+        if match:
+            return match.group(1).strip()
+
+        if path:
+            tail = path.split("/")[-1]
+            if len(tail) >= 6:
+                return tail.strip()
+        return ""
 
     @staticmethod
     def format_time(milliseconds: int) -> str:
