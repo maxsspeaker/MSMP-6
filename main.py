@@ -9,6 +9,7 @@ import threading
 import traceback
 import time
 import discordrpc
+import os
 from dataclasses import dataclass
 from typing import Optional
 from urllib.parse import parse_qs, urlparse
@@ -146,7 +147,6 @@ class JamPlaylistTask(QRunnable):
             )
 
             options = {
-                "quiet": True,
                 "no_warnings": True,
                 "skip_download": True,
                 "extract_flat": True,
@@ -256,6 +256,9 @@ class YtdlpLogger:
 
     def error(self, message: str) -> None:
         logging.error("yt-dlp: %s", message)
+
+    def info(self, message: str) -> None:
+        logging.info("yt-dlp: %s", message)
 
 
 class ResolveTask(QRunnable):
@@ -860,13 +863,13 @@ class PlayerWindow(QMainWindow):
         menu.addAction(action2)
 
         action3 = QAction("Открыть расположение", self)
-        action3.triggered.connect(lambda: print("test3"))
+        action3.triggered.connect(lambda: os.system("xdg-open "+self.playlist[index.row()].page_url))
         menu.addAction(action3)
 
         menu.addSeparator() # Разделитель (опционально)
 
         action4 = QAction("Удалить", self)
-        action4.triggered.connect(lambda: print("test4"))
+        action4.triggered.connect(lambda: self.remove_index(index.row()))
         menu.addAction(action4)
 
         # 5. Показываем меню в точке клика
@@ -1461,6 +1464,20 @@ class PlayerWindow(QMainWindow):
             self.current_index -= 1
         self.refresh_table()
 
+    def remove_index(self,index:int) -> None:
+        if index < 0 or index >= len(self.playlist):
+            return
+
+        del self.playlist[index]
+        self.table.removeRow(index)
+
+        if self.current_index == index:
+            self.stop_playback()
+            self.current_index = None
+        elif self.current_index is not None and index < self.current_index:
+            self.current_index -= 1
+        self.refresh_table()
+
     def clear_playlist(self) -> None:
         self.stop_playback()
         self.playlist.clear()
@@ -1501,8 +1518,8 @@ class PlayerWindow(QMainWindow):
         path, _filter = QFileDialog.getSaveFileName(
             self,
             "Save playlist",
-            "playlist.plmsmpsbox",
-            "MSMP playlist (*.plmsmpsbox);;JSON playlists (*.json)",
+            os.path.expanduser("~")+"/.config/MSMP-Stream/5.0/MyPlaylists/playlist.plmsmpsbox",
+            "MSMP playlist (*.plmsmpsbox);;JSON playlists (*.json)"
         )
         if not path:
             return
@@ -1519,7 +1536,7 @@ class PlayerWindow(QMainWindow):
         path, _filter = QFileDialog.getOpenFileName(
             self,
             "Load playlist",
-            "",
+            os.path.expanduser("~")+"/.config/MSMP-Stream/5.0/MyPlaylists/",
             "MSMP playlist (*.plmsmpsbox);;JSON playlists (*.json);;All files (*)",
         )
         if not path:
