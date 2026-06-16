@@ -31,6 +31,7 @@ from PySide6.QtCore import (
     QtMsgType,
     qInstallMessageHandler,
     QPoint,
+    QSize,
 )
 from PySide6.QtMultimedia import QAudioBufferOutput, QAudioFormat, QAudioOutput, QMediaPlayer
 from PySide6.QtGui import QBrush, QColor, QFont, QLinearGradient, QPainter, QPixmap,QAction,QIcon
@@ -60,12 +61,12 @@ from PySide6 import QtSvg
 ERROR_REPORTER: Optional["ErrorReporter"] = None
 
 # CAVA-style visualizer tuning
-VISUALIZER_BAR_COUNT = 96
+VISUALIZER_BAR_COUNT = 58
 VISUALIZER_BAR_GAP = 2.0
-VISUALIZER_LEFT_MARGIN = 12
-VISUALIZER_RIGHT_MARGIN = 12
+VISUALIZER_LEFT_MARGIN = 0
+VISUALIZER_RIGHT_MARGIN = 0
 VISUALIZER_TOP_MARGIN = 12
-VISUALIZER_BOTTOM_MARGIN = 18
+VISUALIZER_BOTTOM_MARGIN = 12
 VISUALIZER_MIN_BAR_HEIGHT = 1
 
 VISUALIZER_GAIN = 1.0
@@ -74,17 +75,17 @@ VISUALIZER_DECAY = 0.020
 VISUALIZER_PEAK_DECAY = 0.010
 VISUALIZER_MIN_VISIBLE_LEVEL = 0.012
 
-VISUALIZER_WINDOW_WIDTH = 760
-VISUALIZER_WINDOW_HEIGHT = 280
-VISUALIZER_BACKGROUND_COLOR = "#050505"
-VISUALIZER_TRACK_COLOR = "#101010"
+#VISUALIZER_WINDOW_WIDTH = 250
+#VISUALIZER_WINDOW_HEIGHT = 128
+VISUALIZER_BACKGROUND_COLOR = "#000000"
+VISUALIZER_TRACK_COLOR = "#000000"
 VISUALIZER_BAR_COLOR_LOW = "#7CFF6B"
 VISUALIZER_BAR_COLOR_MID = "#D7FF4A"
 VISUALIZER_BAR_COLOR_HIGH = "#FFB347"
 VISUALIZER_BAR_COLOR_PEAK = "#FF5D5D"
 VISUALIZER_BAR_OUTLINE = "#00000000"
 VISUALIZER_PEAK_HEIGHT = 3.0
-VISUALIZER_CORNER_RADIUS = 0
+VISUALIZER_CORNER_RADIUS = 3
 
 
 @dataclass
@@ -379,9 +380,9 @@ class ResolveTask(QRunnable):
 class VisualizerWindow(QWidget):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("MSMP5 Levels")
-        self.setAttribute(Qt.WA_DeleteOnClose)
-        self.resize(VISUALIZER_WINDOW_WIDTH, VISUALIZER_WINDOW_HEIGHT)
+        #self.setWindowTitle("MSMP5 Levels")
+        #self.setAttribute(Qt.WA_DeleteOnClose)
+        #self.resize(VISUALIZER_WINDOW_WIDTH, VISUALIZER_WINDOW_HEIGHT)
         self.levels = [0.0] * VISUALIZER_BAR_COUNT
         self.peaks = [0.0] * VISUALIZER_BAR_COUNT
 
@@ -438,14 +439,15 @@ class VisualizerWindow(QWidget):
 
         drawable_width = max(1.0, width - left - right)
         drawable_height = max(1.0, height - top - bottom)
-        bar_width = max(2.0, (drawable_width - VISUALIZER_BAR_GAP * (VISUALIZER_BAR_COUNT - 1)) / VISUALIZER_BAR_COUNT)
+        bar_width = max(5.0, (drawable_width - VISUALIZER_BAR_GAP * (VISUALIZER_BAR_COUNT - 1)) / VISUALIZER_BAR_COUNT)
         base_y = height - bottom
 
         painter.setPen(Qt.NoPen)
+        painter.setRenderHint(QPainter.Antialiasing, False)
 
         for index, level in enumerate(self.levels):
             peak = self.peaks[index] if index < len(self.peaks) else level
-            x = left + index * (bar_width + VISUALIZER_BAR_GAP)
+            x = left + index * (2 + VISUALIZER_BAR_GAP)
 
             # Background track behind each bar for that CAVA glow-gutter feeling.
             painter.setBrush(QColor(VISUALIZER_TRACK_COLOR))
@@ -761,9 +763,10 @@ class discordrpcWrapper:
     def __init__(self,MainWindow):
         try:
             print("connecting to discordrpc")
-            self.rpc = discordrpc.RPC(app_id=813106125942947881)
+            self.rpc = None
+            #self.rpc = discordrpc.RPC(app_id=813106125942947881)
         except Exception:
-            rpc = None
+            self.rpc = None
 
         self.MainWindow=MainWindow
         self.Status="Stopped"
@@ -852,6 +855,7 @@ class discordrpcWrapper:
 
 class PlayerWindow(QMainWindow):
     MAX_RESTARTS = 3
+    PLAY_MODES_icons = ("assets/arrow-s-right.svg", "assets/out-loop.svg", "assets/loop.svg", "assets/shuffle.svg")
     PLAY_MODES = ("Seq", "One", "All", "Rnd")
 
 
@@ -914,9 +918,19 @@ class PlayerWindow(QMainWindow):
         self.mpris_position_timer.timeout.connect(self.sync_mpris_position)
 
         self._last_mpris_position_us = -1
-        self.visualizer_window: Optional[VisualizerWindow] = None
+
+        #self.visualizer_window: Optional[VisualizerWindow] = None
+
         self.visualizer_levels = [0.0] * VISUALIZER_BAR_COUNT
         self.visualizer_peaks = [0.0] * VISUALIZER_BAR_COUNT
+
+        self.visualizer_window = VisualizerWindow()
+        self.visualizer_window.set_levels(self.visualizer_levels, self.visualizer_peaks)
+        self.visualizer_window.show()
+        #self.visualizer_window.raise_()
+        self.visualizer_window.activateWindow()
+        self.visualizer_window.setFixedSize(233,128)
+
 
         self.thread_pool = QThreadPool.globalInstance()
         self.resolve_signals = ResolveSignals()
@@ -943,8 +957,12 @@ class PlayerWindow(QMainWindow):
         self.player.mediaStatusChanged.connect(self.on_media_status_changed)
         self.player.errorOccurred.connect(self.on_player_error)
 
+
+        self.NowDisplay = QWidget(self)
+        self.NowDisplay.setObjectName("NowDisplay")
+
         self.cover_label = QLabel()
-        self.cover_label.setFixedSize(190, 190)
+        self.cover_label.setFixedSize(128, 128)
         self.cover_label.setAlignment(Qt.AlignCenter)
         self.cover_label.setObjectName("cover")
         self.set_cover_placeholder()
@@ -975,14 +993,34 @@ class PlayerWindow(QMainWindow):
         self.cookie_browser.addItem("Brave cookies", "brave")
         self.cookie_browser.addItem("Edge cookies", "edge")
 
-        self.play_button = QPushButton("Play")
-        self.pause_button = QPushButton("Pause")
-        self.stop_button = QPushButton("Stop")
-        self.prev_button = QPushButton("Prev")
-        self.next_button = QPushButton("Next")
-        self.restart_button = QPushButton("Restart")
-        self.visualizer_button = QPushButton("Levels")
-        self.mode_button = QPushButton(self.PLAY_MODES[self.play_mode_index])
+        self.play_button = QPushButton()
+        self.play_button.setIcon(QIcon("assets/play.svg"))
+        self.play_button.setIconSize(QSize(26, 26))
+
+        self.pause_button = QPushButton()
+        self.pause_button.setIcon(QIcon("assets/pause.svg"))
+        self.pause_button.setIconSize(QSize(26, 26))
+
+        self.stop_button = QPushButton()
+        self.stop_button.setIcon(QIcon("assets/stop.svg"))
+        self.stop_button.setIconSize(QSize(26, 26))
+
+        self.prev_button = QPushButton()
+        self.prev_button.setIcon(QIcon("assets/previous.svg"))
+        self.prev_button.setIconSize(QSize(26, 26))
+
+        self.next_button = QPushButton()
+        self.next_button.setIcon(QIcon("assets/next.svg"))
+        self.next_button.setIconSize(QSize(26, 26))
+
+        self.restart_button = QPushButton()
+        self.restart_button.setIcon(QIcon("assets/reload-audio.svg"))
+        self.restart_button.setIconSize(QSize(26, 26))
+
+        #self.visualizer_button = QPushButton("Levels")
+        self.mode_button = QPushButton()
+        self.mode_button.setIcon(QIcon(self.PLAY_MODES_icons[self.play_mode_index]))
+        self.mode_button.setIconSize(QSize(26, 26))
 
         self.play_button.clicked.connect(self.play_selected_or_current)
         self.pause_button.clicked.connect(self.pause_playback)
@@ -990,7 +1028,7 @@ class PlayerWindow(QMainWindow):
         self.prev_button.clicked.connect(self.play_previous)
         self.next_button.clicked.connect(self.play_next)
         self.restart_button.clicked.connect(self.restart_current_stream)
-        self.visualizer_button.clicked.connect(self.show_visualizer)
+        #self.visualizer_button.clicked.connect(self.show_visualizer)
         self.mode_button.clicked.connect(self.toggle_play_mode)
 
         self.position_slider = QSlider(Qt.Horizontal)
@@ -1033,16 +1071,15 @@ class PlayerWindow(QMainWindow):
         self.down_button = QPushButton("Down")
         self.save_button = QPushButton("Save")
         self.load_button = QPushButton("Load")
-        self.remove_button.clicked.connect(self.remove_selected)
         self.clear_button.clicked.connect(self.clear_playlist)
         self.up_button.clicked.connect(lambda: self.move_selected(-1))
         self.down_button.clicked.connect(lambda: self.move_selected(1))
         self.save_button.clicked.connect(self.save_playlist)
         self.load_button.clicked.connect(self.load_playlist)
 
-        controls_layout = QHBoxLayout()
-        controls_layout.setSpacing(8)
-        controls_layout.addStretch(1)
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(8)
+        button_layout.addStretch(1)
         for button in (
             self.prev_button,
             self.stop_button,
@@ -1050,23 +1087,25 @@ class PlayerWindow(QMainWindow):
             self.pause_button,
             self.next_button,
             self.restart_button,
-            self.visualizer_button,
+   #         self.visualizer_button,
         ):
-            controls_layout.addWidget(button)
-        controls_layout.addStretch(1)
+            button_layout.addWidget(button)
+        button_layout.addStretch(3)
+
+        button_layout.addWidget(self.mode_button)
+        button_layout.addWidget(self.volume_slider)
 
         seek_layout = QHBoxLayout()
         seek_layout.addWidget(self.position_slider, 1)
         seek_layout.addWidget(self.time_label)
 
-        right_controls = QHBoxLayout()
-        right_controls.addWidget(self.mode_button)
-        right_controls.addWidget(self.volume_slider)
+        #right_controls = QHBoxLayout()
+        #right_controls.addWidget(self.mode_button)
+        #right_controls.addWidget(self.volume_slider)
 
-        top_right_layout = QVBoxLayout()
+        #top_right_layout = QVBoxLayout()
         #top_right_layout.addWidget(self.duration_label)
-        top_right_layout.addStretch(1)
-        top_right_layout.addLayout(right_controls)
+        #top_right_layout.addStretch(1)
 
         meta_layout = QVBoxLayout()
         meta_layout.addStretch(1)
@@ -1074,14 +1113,26 @@ class PlayerWindow(QMainWindow):
         meta_layout.addWidget(self.artist_label)
         meta_layout.addWidget(self.album_label)
         meta_layout.addStretch(1)
-        meta_layout.addLayout(controls_layout)
-        meta_layout.addLayout(seek_layout)
 
-        now_playing_layout = QHBoxLayout()
+        now_playing_layout = QVBoxLayout()
         now_playing_layout.setContentsMargins(12, 12, 12, 12)
-        now_playing_layout.addWidget(self.cover_label)
-        now_playing_layout.addLayout(meta_layout, 1)
-        now_playing_layout.addLayout(top_right_layout)
+
+        playNow_layout = QHBoxLayout()
+        playNow_layout.setContentsMargins(12, 12, 12, 12)
+        playNow_layout.addWidget(self.cover_label)
+        playNow_layout.addLayout(meta_layout, 1)
+        playNow_layout.addWidget(self.visualizer_window)
+
+
+        self.NowDisplay.setLayout(playNow_layout)
+        #now_playing_layout.addLayout(controls_layout)
+
+        control_layout = QVBoxLayout()
+
+        control_layout.addLayout(button_layout)
+        control_layout.addLayout(seek_layout)
+
+        now_playing_layout.addLayout(control_layout)
 
         now_playing = QFrame()
         now_playing.setObjectName("nowPlaying")
@@ -1092,9 +1143,8 @@ class PlayerWindow(QMainWindow):
         playlist_menu.addWidget(self.add_button)
         playlist_menu.addWidget(self.url_input, 1)
         playlist_menu.addWidget(self.cookie_browser)
-        playlist_menu.addWidget(self.up_button)
-        playlist_menu.addWidget(self.down_button)
-        playlist_menu.addWidget(self.remove_button)
+       # playlist_menu.addWidget(self.up_button)
+      #  playlist_menu.addWidget(self.down_button)
         playlist_menu.addWidget(self.clear_button)
         playlist_menu.addWidget(self.save_button)
         playlist_menu.addWidget(self.load_button)
@@ -1102,6 +1152,7 @@ class PlayerWindow(QMainWindow):
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
+        layout.addWidget(self.NowDisplay)
         layout.addWidget(now_playing)
         layout.addWidget(self.table, 1)
         layout.addLayout(playlist_menu)
@@ -1680,7 +1731,7 @@ class PlayerWindow(QMainWindow):
 
     def toggle_play_mode(self) -> None:
         self.play_mode_index = (self.play_mode_index + 1) % len(self.PLAY_MODES)
-        self.mode_button.setText(self.PLAY_MODES[self.play_mode_index])
+        self.mode_button.setIcon(QIcon(self.PLAY_MODES_icons[self.play_mode_index]))
         self.emit_mpris_properties_changed("org.mpris.MediaPlayer2.Player", {
             "LoopStatus": self.current_mpris_loop_status(),
             "Shuffle": self.PLAY_MODES[self.play_mode_index] == "Rnd",
@@ -1781,7 +1832,7 @@ class PlayerWindow(QMainWindow):
         target = modes.get(value)
         if target and target in self.PLAY_MODES:
             self.play_mode_index = self.PLAY_MODES.index(target)
-            self.mode_button.setText(target)
+            self.mode_button.setIcon(QIcon(self.PLAY_MODES_icons[target]))
             self.update_mpris_player_properties({"LoopStatus": value})
 
     def set_shuffle_from_mpris(self, value: bool) -> None:
@@ -2026,6 +2077,12 @@ class PlayerWindow(QMainWindow):
                 background: #171717;
                 border-bottom: 1px solid #232323;
             }
+
+            #NowDisplay{
+                background: #000000;
+            }
+
+
             #cover {
                 background: #101010;
                 border: 1px solid #202020;
@@ -2034,10 +2091,14 @@ class PlayerWindow(QMainWindow):
                 color: #f5f5f5;
                 font-size: 19px;
                 font-weight: 700;
+                margin: 2px;
+                margin-left:10px;
             }
             #metaText {
                 color: #a8a8a8;
                 font-size: 14px;
+                margin: 2px;
+                margin-left:10px;
             }
             #durationText {
                 color: #d6d6d6;
