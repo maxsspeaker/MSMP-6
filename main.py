@@ -33,7 +33,7 @@ from PySide6.QtCore import (
     QPoint,
 )
 from PySide6.QtMultimedia import QAudioBufferOutput, QAudioFormat, QAudioOutput, QMediaPlayer
-from PySide6.QtGui import QBrush, QColor, QFont, QLinearGradient, QPainter, QPixmap,QAction
+from PySide6.QtGui import QBrush, QColor, QFont, QLinearGradient, QPainter, QPixmap,QAction,QIcon
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest
 from PySide6.QtWidgets import (
     QApplication,
@@ -54,6 +54,7 @@ from PySide6.QtWidgets import (
     QWidget,
     QMenu,
 )
+from PySide6 import QtSvg
 
 
 ERROR_REPORTER: Optional["ErrorReporter"] = None
@@ -117,6 +118,7 @@ class ResolveSignals(QObject):
 
 class JamPlaylistSignals(QObject):
     parsed = Signal(int, object, str)
+    status = Signal(str)
     failed = Signal(int, str, str)
 
 
@@ -146,6 +148,8 @@ class JamPlaylistTask(QRunnable):
                 f"{video_id}&list=RD{video_id}&start_radio=1"
             )
 
+            print("Resolving playlist")
+
             options = {
                 "no_warnings": True,
                 "skip_download": True,
@@ -154,7 +158,7 @@ class JamPlaylistTask(QRunnable):
                 "nocheckcertificate": True,
                 "retries": 3,
                 "fragment_retries": 3,
-                "logger": YtdlpLogger(),
+                "logger": YtdlpLogger(self.signals.status),
             }
             if self.cookie_browser:
                 options["cookiesfrombrowser"] = (self.cookie_browser,)
@@ -248,7 +252,12 @@ class ErrorReporter(QObject):
 
 
 class YtdlpLogger:
+    def __init__(self,status=None):
+        self.status=status
+
     def debug(self, message: str) -> None:
+        if(self.status):
+            self.status.emit(message)
         logging.debug("yt-dlp: %s", message)
 
     def warning(self, message: str) -> None:
@@ -281,16 +290,21 @@ class ResolveTask(QRunnable):
             options = {
                 "format": "bestaudio/best",
                 "noplaylist": True,
-                "no_warnings": True,
+      #          "no_warnings": True,
                 "logger": YtdlpLogger(),
                 "skip_download": True,
                 "extract_flat": False,
+                'verbose': True,
                 "nocheckcertificate": True,
                 "retries": 3,
                 "fragment_retries": 3,
+                'js_runtimes': {'node': {'path': '/usr/bin/node'}},
+                'remote_components': ['ejs:github'],
             }
             if self.cookie_browser:
                 options["cookiesfrombrowser"] = (self.cookie_browser,)
+
+            print("Resolving audio")
 
             with yt_dlp.YoutubeDL(options) as ydl:
                 data = ydl.extract_info(self.url, download=False)
@@ -857,8 +871,7 @@ class PlayerWindow(QMainWindow):
 
 
         action2 = QAction("Запустить Джем", self)
-        action2.triggered.connect(
-            lambda row=index.row(): self.parse_jam_playlist(row)
+        action2.triggered.connect(lambda: self.parse_jam_playlist(self.table.rowAt(position.y()))
         )
         menu.addAction(action2)
 
@@ -879,6 +892,8 @@ class PlayerWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("MSMP Stream")
         self.resize(820, 760)
+
+        self.setWindowIcon(QIcon("assets/MSMPicon.png"))
 
         self.playlist: list[PlaylistItem] = []
         self.current_index: Optional[int] = None
@@ -909,6 +924,7 @@ class PlayerWindow(QMainWindow):
         self.resolve_signals.failed.connect(self.on_resolve_failed)
         self.jam_signals = JamPlaylistSignals()
         self.jam_signals.parsed.connect(self.on_jam_playlist_parsed)
+        self.jam_signals.status.connect(self.on_jam_playlist_status)
         self.jam_signals.failed.connect(self.on_jam_playlist_failed)
         self.network = QNetworkAccessManager(self)
         self.network.finished.connect(self.on_artwork_loaded)
@@ -1153,6 +1169,13 @@ class PlayerWindow(QMainWindow):
         )
         task.setAutoDelete(True)
         self.thread_pool.start(task)
+
+    def on_jam_playlist_status(
+        self,
+        status: str,
+    ) -> None:
+
+        self.status_label.setText(status)
 
     def on_jam_playlist_parsed(
         self,
@@ -1518,7 +1541,7 @@ class PlayerWindow(QMainWindow):
         path, _filter = QFileDialog.getSaveFileName(
             self,
             "Save playlist",
-            os.path.expanduser("~")+"/.config/MSMP-Stream/5.0/MyPlaylists/playlist.plmsmpsbox",
+            os.path.expanduser("~")+f"/.config/MSMP-Stream/5.0/MyPlaylists/{self.playlist_title}.plmsmpsbox",
             "MSMP playlist (*.plmsmpsbox);;JSON playlists (*.json)"
         )
         if not path:
@@ -2166,7 +2189,7 @@ def excepthook(exc_type, exc_value, exc_tb):
 
 def main() -> int:
 
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(message)s")
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(message)s") #,filename="app.log",filemode="w",force=True 
     app = QApplication(sys.argv)
     global ERROR_REPORTER
     ERROR_REPORTER = ErrorReporter()
