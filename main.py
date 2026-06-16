@@ -763,8 +763,7 @@ class discordrpcWrapper:
     def __init__(self,MainWindow):
         try:
             print("connecting to discordrpc")
-            self.rpc = None
-            #self.rpc = discordrpc.RPC(app_id=813106125942947881)
+            self.rpc = discordrpc.RPC(app_id=813106125942947881)
         except Exception:
             self.rpc = None
 
@@ -792,18 +791,20 @@ class discordrpcWrapper:
             else:
                 ts_start=int(time.time()) - self.position
                 ts_end=int(time.time()) + self.itemSelected.duration - self.position
-            self.rpc.set_activity(
-                state=self.itemSelected.uploader or "Unknown artist",
-                details=self.itemSelected.title,
-                act_type=discordrpc.Activity.Listening,
-                ts_start=ts_start,
-                ts_end=ts_end,
-                large_image=self.itemSelected.artwork_url,
-                small_image=self.Status.lower(),
-                small_text=self.Status,
-                large_text=self.itemSelected.album or self.MainWindow.playlist_title or None
-                )
-
+            try:
+                self.rpc.set_activity(
+                    state=self.itemSelected.uploader or "Unknown artist",
+                    details=self.itemSelected.title,
+                    act_type=discordrpc.Activity.Listening,
+                    ts_start=ts_start,
+                    ts_end=ts_end,
+                    large_image=self.itemSelected.artwork_url,
+                    small_image=self.Status.lower(),
+                    small_text=self.Status,
+                    large_text=self.itemSelected.album or self.MainWindow.playlist_title or None
+                    )
+            except:
+                self.rpc = None
     def set_playback_status(self, status: str) -> None:
         if status not in {"Playing", "Paused", "Stopped"}:
             return
@@ -819,17 +820,20 @@ class discordrpcWrapper:
             else:
                 ts_start=int(time.time()) - self.position
                 ts_end=int(time.time()) + self.itemSelected.duration - self.position
-            self.rpc.set_activity(
-                state=self.itemSelected.uploader or "Unknown artist",
-                details=self.itemSelected.title,
-                act_type=discordrpc.Activity.Listening,
-                ts_start=ts_start,
-                ts_end=ts_end,
-                large_image=self.itemSelected.artwork_url,
-                small_image=self.Status.lower(),
-                small_text=self.Status,
-                large_text=self.itemSelected.album or self.MainWindow.playlist_title or None
-                )
+            try:
+                self.rpc.set_activity(
+                    state=self.itemSelected.uploader or "Unknown artist",
+                    details=self.itemSelected.title,
+                    act_type=discordrpc.Activity.Listening,
+                    ts_start=ts_start,
+                    ts_end=ts_end,
+                    large_image=self.itemSelected.artwork_url,
+                    small_image=self.Status.lower(),
+                    small_text=self.Status,
+                    large_text=self.itemSelected.album or self.MainWindow.playlist_title or None
+                    )
+            except:
+                self.rpc = None
     def sync_position(self, position_ms: int) -> None:
         self.position=int(position_ms/1000)
         if(self.rpc):
@@ -839,17 +843,20 @@ class discordrpcWrapper:
             else:
                 ts_start=int(time.time()) - self.position
                 ts_end=int(time.time()) + self.itemSelected.duration - self.position
-            self.rpc.set_activity(
-                state=self.itemSelected.uploader or "Unknown artist",
-                details=self.itemSelected.title,
-                act_type=discordrpc.Activity.Listening,
-                ts_start=ts_start,
-                ts_end=ts_end,
-                large_image=self.itemSelected.artwork_url,
-                small_image=self.Status.lower(),
-                small_text=self.Status,
-                large_text=self.itemSelected.album or self.MainWindow.playlist_title or None
-                )
+            try:
+                self.rpc.set_activity(
+                    state=self.itemSelected.uploader or "Unknown artist",
+                    details=self.itemSelected.title,
+                    act_type=discordrpc.Activity.Listening,
+                    ts_start=ts_start,
+                    ts_end=ts_end,
+                    large_image=self.itemSelected.artwork_url,
+                    small_image=self.Status.lower(),
+                    small_text=self.Status,
+                    large_text=self.itemSelected.album or self.MainWindow.playlist_title or None
+                    )
+            except:
+                self.rpc = None
 
 
 
