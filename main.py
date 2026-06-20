@@ -13,6 +13,7 @@ import os
 from dataclasses import dataclass
 from typing import Optional
 from urllib.parse import parse_qs, urlparse
+import argparse
 
 import yt_dlp
 from dbus_next import Variant
@@ -763,7 +764,7 @@ class discordrpcWrapper:
     def __init__(self,MainWindow):
         try:
             print("connecting to discordrpc")
-            self.rpc = discordrpc.RPC(app_id=813106125942947881)
+            self.rpc = discordrpc.RPC(app_id=811577404279619634)
         except Exception:
             self.rpc = None
 
@@ -772,6 +773,19 @@ class discordrpcWrapper:
 
         self.itemSelected=None
         self.position=0
+
+        try:
+            self.rpc.set_activity(
+                        state=None,
+                        details=None,
+                        act_type=discordrpc.Activity.Listening,
+                        large_image="msmpwave",
+                        small_image=self.Status.lower(),
+                        small_text=self.Status,
+                        large_text=None
+                        )
+        except:
+            self.rpc = None
 
 
     def set_activity(self, item: PlaylistItem) -> None:
@@ -814,13 +828,26 @@ class discordrpcWrapper:
         print(self.position)
 
         if(self.rpc):
-            if not(self.Status=="Playing"):
+            try:
                 ts_start=None
                 ts_end=None
-            else:
-                ts_start=int(time.time()) - self.position
-                ts_end=int(time.time()) + self.itemSelected.duration - self.position
-            try:
+                if (self.Status=="Playing"):
+                    ts_start=int(time.time()) - self.position
+                    ts_end=int(time.time()) + self.itemSelected.duration - self.position
+                elif(self.Status=="Stopped"):
+                    self.rpc.set_activity(
+                        state=None,
+                        details=None,
+                        act_type=discordrpc.Activity.Listening,
+                        ts_start=ts_start,
+                        ts_end=ts_end,
+                        large_image="msmpwave",
+                        small_image=self.Status.lower(),
+                        small_text=self.Status,
+                        large_text=None
+                        )
+                    return
+            
                 self.rpc.set_activity(
                     state=self.itemSelected.uploader or "Unknown artist",
                     details=self.itemSelected.title,
@@ -2087,6 +2114,7 @@ class PlayerWindow(QMainWindow):
 
             #NowDisplay{
                 background: #000000;
+                border radius:16px;
             }
 
 
@@ -2257,6 +2285,16 @@ def excepthook(exc_type, exc_value, exc_tb):
 
 def main() -> int:
 
+    parser = argparse.ArgumentParser(description="PySide6 Fullscreen App")
+    parser.add_argument(
+        '-f', '--fullscreen', 
+        action='store_true', 
+        help="Запустить приложение в полноэкранном режиме"
+    )
+    
+    # Игнорируем аргументы, которые PySide6 забирает себе автоматически
+    args, unknown = parser.parse_known_args()
+
     logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(message)s") #,filename="app.log",filemode="w",force=True 
     app = QApplication(sys.argv)
     global ERROR_REPORTER
@@ -2265,7 +2303,10 @@ def main() -> int:
 
     sys.excepthook
     window = PlayerWindow()
-    window.show()
+    if args.fullscreen:
+        window.showFullScreen()
+    else:
+        window.show() 
     return app.exec()
 
 
