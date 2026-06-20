@@ -1,4 +1,4 @@
-# MSMP5 Audio Player
+# MSMP FoxWave
 
 PySide6-аудиоплеер, который получает аудиопотоки через `yt-dlp`.
 

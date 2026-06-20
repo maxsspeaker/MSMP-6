@@ -10,10 +10,14 @@ import traceback
 import time
 import discordrpc
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 from urllib.parse import parse_qs, urlparse
 import argparse
+import math
+import shutil
+import subprocess
+import tempfile
 
 import yt_dlp
 from dbus_next import Variant
@@ -88,6 +92,14 @@ VISUALIZER_BAR_OUTLINE = "#00000000"
 VISUALIZER_PEAK_HEIGHT = 3.0
 VISUALIZER_CORNER_RADIUS = 3
 
+WAVEFORM_BIN_COUNT = 440
+WAVEFORM_BACKGROUND_COLOR = "#000000"
+WAVEFORM_TRACK_COLOR = "#232323"
+WAVEFORM_BUFFER_COLOR = "#7c7c7c"
+WAVEFORM_PLAYED_COLOR = "#e8e8e8"
+WAVEFORM_HANDLE_COLOR = "#f2f2f2"
+WAVEFORM_HEIGHT = 44
+
 
 @dataclass
 class PlaylistItem:
@@ -102,6 +114,8 @@ class PlaylistItem:
     publis: bool = False
     unavailable: bool = False
     load_error: str = ""
+    waveform: list[float] = field(default_factory=list)
+    waveform_ready: bool = False
 
 
 def is_video_unavailable_error(error: str) -> bool:
@@ -486,6 +500,292 @@ class VisualizerWindow(QWidget):
                 VISUALIZER_CORNER_RADIUS,
                 VISUALIZER_CORNER_RADIUS,
             )
+
+
+
+class WaveformSeekBar(QWidget):
+    sliderPressed = Signal()
+    sliderMoved = Signal(int)
+    sliderReleased = Signal()
+    valueChanged = Signal(int)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._minimum = 0
+        self._maximum = 1
+        self._value = 0
+        self._waveform: list[float] = []
+        self._buffered_ratio = 0.0
+        self._dragging = False
+        self.setMouseTracking(True)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFixedHeight(WAVEFORM_HEIGHT)
+        self.setObjectName("waveformSeekBar")
+
+    def setRange(self, minimum: int, maximum: int) -> None:
+        self._minimum = int(minimum)
+        self._maximum = max(self._minimum, int(maximum))
+        self.setValue(self._value)
+
+    def setValue(self, value: int) -> None:
+        value = self._clamp(value)
+        if value != self._value:
+            self._value = value
+            self.valueChanged.emit(self._value)
+        self.update()
+
+    def value(self) -> int:
+        return self._value
+
+    def set_waveform(self, waveform: list[float]) -> None:
+        self._waveform = [min(1.0, max(0.0, float(level))) for level in waveform]
+        self.update()
+
+    def set_buffered_ratio(self, ratio: float) -> None:
+        self._buffered_ratio = max(0.0, min(1.0, float(ratio)))
+        self.update()
+
+    def _clamp(self, value: int) -> int:
+        return max(self._minimum, min(self._maximum, int(value)))
+
+    def _value_from_x(self, x: float) -> int:
+        if self._maximum <= self._minimum:
+            return self._minimum
+
+        usable = max(1.0, float(self.width() - 24))
+        left = 12.0
+        ratio = (float(x) - left) / usable
+        ratio = max(0.0, min(1.0, ratio))
+        return int(round(self._minimum + ratio * (self._maximum - self._minimum)))
+
+    def _x_from_value(self, value: int) -> float:
+        if self._maximum <= self._minimum:
+            return 12.0
+        usable = max(1.0, float(self.width() - 24))
+        ratio = (self._clamp(value) - self._minimum) / float(self._maximum - self._minimum)
+        return 12.0 + ratio * usable
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            self._dragging = True
+            self.sliderPressed.emit()
+            value = self._value_from_x(event.position().x())
+            self.setValue(value)
+            self.sliderMoved.emit(value)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._dragging:
+            value = self._value_from_x(event.position().x())
+            self.setValue(value)
+            self.sliderMoved.emit(value)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if self._dragging and event.button() == Qt.LeftButton:
+            value = self._value_from_x(event.position().x())
+            self.setValue(value)
+            self.sliderMoved.emit(value)
+            self._dragging = False
+            self.sliderReleased.emit()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.fillRect(self.rect(), QColor(WAVEFORM_BACKGROUND_COLOR))
+
+        outer = self.rect().adjusted(2, 6, -2, -6)
+        if outer.width() <= 0 or outer.height() <= 0:
+            return
+
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor("#141414"))
+        painter.drawRoundedRect(outer, 8, 8)
+
+        inner = outer.adjusted(10, 3, -10, -3)
+        if inner.width() <= 0 or inner.height() <= 0:
+            return
+
+        center_y = inner.center().y()
+        half_height = max(1.0, inner.height() / 2.0)
+        waveform = self._waveform
+
+        if waveform:
+            bin_count = len(waveform)
+            if bin_count <= 0:
+                waveform = []
+            else:
+                bin_width = max(1.0, inner.width() / float(bin_count))
+                played_index = 0
+                if self._maximum > self._minimum:
+                    played_index = int(
+                        (self._value - self._minimum)
+                        / float(self._maximum - self._minimum)
+                        * max(0, bin_count - 1)
+                    )
+                buffered_index = int(max(0, bin_count - 1) * self._buffered_ratio)
+
+                for i, level in enumerate(waveform):
+                    x = inner.left() + i * bin_width
+                    bar_h = max(1.0, level * half_height)
+                    if i <= played_index:
+                        color = QColor(WAVEFORM_PLAYED_COLOR)
+                    elif i <= buffered_index:
+                        color = QColor(WAVEFORM_BUFFER_COLOR)
+                    else:
+                        color = QColor(WAVEFORM_TRACK_COLOR)
+                    painter.setBrush(color)
+                    painter.drawRect(int(x), int(center_y - bar_h), max(1, int(math.ceil(bin_width))), int(bar_h * 2))
+        else:
+            painter.setBrush(QColor(WAVEFORM_TRACK_COLOR))
+            painter.drawRect(inner)
+
+            buffered_width = int(round(inner.width() * self._buffered_ratio))
+            if buffered_width > 0:
+                buffered_rect = inner.__class__(inner.left(), inner.top(), buffered_width, inner.height())
+                painter.setBrush(QColor(WAVEFORM_BUFFER_COLOR))
+                painter.drawRect(buffered_rect)
+
+        if self._maximum > self._minimum:
+            handle_x = self._x_from_value(self._value)
+            painter.setBrush(QColor(WAVEFORM_HANDLE_COLOR))
+            painter.drawRect(int(handle_x) - 1, inner.top() - 3, 2, inner.height() + 6)
+
+
+class WaveformSignals(QObject):
+    generated = Signal(int, object)
+    failed = Signal(int, str)
+
+
+class WaveformTask(QRunnable):
+    def __init__(
+        self,
+        index: int,
+        stream_url: str,
+        duration_ms: int,
+        signals: WaveformSignals,
+        cookie_browser: str = "",
+    ) -> None:
+        super().__init__()
+        self.index = index
+        self.stream_url = stream_url
+        self.duration_ms = duration_ms
+        self.cookie_browser = cookie_browser
+        self.signals = signals
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            waveform = self.generate_waveform()
+            self.signals.generated.emit(self.index, waveform)
+        except BaseException as exc:
+            self.signals.failed.emit(self.index, str(exc).strip() or exc.__class__.__name__)
+
+    @staticmethod
+    def _finalize_chunk(peak: float, rms_sum: float, sample_count: int) -> float:
+        if sample_count <= 0:
+            return 0.0
+        rms = math.sqrt(max(0.0, rms_sum) / float(sample_count))
+        # Peak keeps transients, RMS keeps the body; together they follow the real track shape better.
+        return max(peak, rms * 1.08)
+
+    def generate_waveform(self) -> list[float]:
+        ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg:
+            raise RuntimeError("ffmpeg not found in PATH")
+
+        if not self.stream_url:
+            raise RuntimeError("stream url is empty")
+
+        if self.duration_ms <= 0:
+            raise RuntimeError("track duration is unknown")
+
+        sample_rate = 22050
+        chunk_samples = 2048
+
+        cmd = [
+            ffmpeg,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-reconnect",
+            "1",
+            "-reconnect_streamed",
+            "1",
+            "-reconnect_delay_max",
+            "2",
+            "-i",
+            self.stream_url,
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            str(sample_rate),
+            "-f",
+            "s16le",
+            "pipe:1",
+        ]
+
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        assert proc.stdout is not None
+        assert proc.stderr is not None
+
+        from array import array
+
+        chunks: list[float] = []
+        chunk_peak = 0.0
+        chunk_rms_sum = 0.0
+        chunk_count = 0
+
+        while True:
+            chunk = proc.stdout.read(65536)
+            if not chunk:
+                break
+
+            samples = array("h")
+            samples.frombytes(chunk)
+            if sys.byteorder != "little":
+                samples.byteswap()
+
+            for sample in samples:
+                value = abs(sample) / 32768.0
+                if value > chunk_peak:
+                    chunk_peak = value
+                chunk_rms_sum += value * value
+                chunk_count += 1
+
+                if chunk_count >= chunk_samples:
+                    chunks.append(self._finalize_chunk(chunk_peak, chunk_rms_sum, chunk_count))
+                    chunk_peak = 0.0
+                    chunk_rms_sum = 0.0
+                    chunk_count = 0
+
+        if chunk_count:
+            chunks.append(self._finalize_chunk(chunk_peak, chunk_rms_sum, chunk_count))
+
+        stderr = proc.stderr.read().decode("utf-8", errors="replace").strip()
+        return_code = proc.wait()
+
+        if return_code != 0 and not chunks:
+            raise RuntimeError(stderr or f"ffmpeg exited with code {return_code}")
+
+        if not chunks:
+            return [0.0] * WAVEFORM_BIN_COUNT
+
+        waveform = VisualizerWindow.resample_levels(chunks, WAVEFORM_BIN_COUNT)
+        peak = max(waveform) if waveform else 0.0
+        if peak <= 0.0:
+            return [0.0] * WAVEFORM_BIN_COUNT
+
+        return [min(1.0, max(0.0, (value / peak) ** 0.82)) for value in waveform]
 
 
 class MprisCommandBridge(QObject):
@@ -965,6 +1265,8 @@ class PlayerWindow(QMainWindow):
         self.visualizer_window.activateWindow()
         self.visualizer_window.setFixedSize(233,128)
 
+        self.waveform_cache: dict[str, list[float]] = {}
+        self.waveform_generation_indexes: set[int] = set()
 
         self.thread_pool = QThreadPool.globalInstance()
         self.resolve_signals = ResolveSignals()
@@ -974,6 +1276,9 @@ class PlayerWindow(QMainWindow):
         self.jam_signals.parsed.connect(self.on_jam_playlist_parsed)
         self.jam_signals.status.connect(self.on_jam_playlist_status)
         self.jam_signals.failed.connect(self.on_jam_playlist_failed)
+        self.waveform_signals = WaveformSignals()
+        self.waveform_signals.generated.connect(self.on_waveform_generated)
+        self.waveform_signals.failed.connect(self.on_waveform_failed)
         self.network = QNetworkAccessManager(self)
         self.network.finished.connect(self.on_artwork_loaded)
 
@@ -990,7 +1295,14 @@ class PlayerWindow(QMainWindow):
         self.player.playbackStateChanged.connect(self.on_playback_state_changed)
         self.player.mediaStatusChanged.connect(self.on_media_status_changed)
         self.player.errorOccurred.connect(self.on_player_error)
+        try:
+            self.player.bufferProgressChanged.connect(self.on_buffer_progress_changed)
+        except AttributeError:
+            pass
 
+        self.buffer_progress_timer = QTimer(self)
+        self.buffer_progress_timer.setInterval(120)
+        self.buffer_progress_timer.timeout.connect(self.poll_buffer_progress)
 
         self.NowDisplay = QWidget(self)
         self.NowDisplay.setObjectName("NowDisplay")
@@ -1065,8 +1377,9 @@ class PlayerWindow(QMainWindow):
         #self.visualizer_button.clicked.connect(self.show_visualizer)
         self.mode_button.clicked.connect(self.toggle_play_mode)
 
-        self.position_slider = QSlider(Qt.Horizontal)
+        self.position_slider = WaveformSeekBar()
         self.position_slider.setRange(0, 0)
+        self.position_slider.set_buffered_ratio(0.0)
         self.position_slider.sliderPressed.connect(self.on_seek_start)
         self.position_slider.sliderReleased.connect(self.on_seek_end)
         self.position_slider.sliderMoved.connect(self.on_seek_preview)
@@ -1125,13 +1438,14 @@ class PlayerWindow(QMainWindow):
         ):
             button_layout.addWidget(button)
         button_layout.addStretch(3)
+        button_layout.addWidget(self.time_label)
 
         button_layout.addWidget(self.mode_button)
         button_layout.addWidget(self.volume_slider)
 
-        seek_layout = QHBoxLayout()
-        seek_layout.addWidget(self.position_slider, 1)
-        seek_layout.addWidget(self.time_label)
+        #seek_layout = QHBoxLayout()
+        #seek_layout.addWidget(self.position_slider, 1)
+        #seek_layout.addWidget(self.time_label)
 
         #right_controls = QHBoxLayout()
         #right_controls.addWidget(self.mode_button)
@@ -1151,20 +1465,25 @@ class PlayerWindow(QMainWindow):
         now_playing_layout = QVBoxLayout()
         now_playing_layout.setContentsMargins(12, 12, 12, 12)
 
+        NowDisplayLayout=QVBoxLayout()
+
         playNow_layout = QHBoxLayout()
         playNow_layout.setContentsMargins(12, 12, 12, 12)
         playNow_layout.addWidget(self.cover_label)
         playNow_layout.addLayout(meta_layout, 1)
         playNow_layout.addWidget(self.visualizer_window)
 
+        NowDisplayLayout.addLayout(playNow_layout, 1)
+        NowDisplayLayout.addWidget(self.position_slider)
 
-        self.NowDisplay.setLayout(playNow_layout)
+
+        self.NowDisplay.setLayout(NowDisplayLayout)
         #now_playing_layout.addLayout(controls_layout)
 
         control_layout = QVBoxLayout()
 
         control_layout.addLayout(button_layout)
-        control_layout.addLayout(seek_layout)
+        #control_layout.addLayout(seek_layout)
 
         now_playing_layout.addLayout(control_layout)
 
@@ -1325,6 +1644,11 @@ class PlayerWindow(QMainWindow):
         if index < 0 or index >= len(self.playlist):
             return
 
+        cached_waveform = self.waveform_cache.get(item.page_url)
+        if cached_waveform:
+            item.waveform = cached_waveform
+            item.waveform_ready = True
+
         self.playlist[index] = item
         self.set_row(index, item)
         self.status_label.setText(f"Resolved: {item.title}")
@@ -1456,8 +1780,10 @@ class PlayerWindow(QMainWindow):
 
     def stop_playback(self) -> None:
         self.stop_mpris_position_updates()
+        self.stop_buffer_progress_monitor()
         self.player.stop()
         self._last_mpris_position_us = 0
+        self.update_buffer_progress(0.0)
         self.set_mpris_playback_status("Stopped")
         self.update_mpris_player_properties({"Position": 0})
 
@@ -1508,6 +1834,8 @@ class PlayerWindow(QMainWindow):
         self.update_current_metadata(item)
 
         self._last_mpris_position_us = -1
+        self.position_slider.set_waveform(item.waveform)
+        self.update_buffer_progress(0.0)
         self.player.setSource(QUrl(item.stream_url))
         self.player.play()
 
@@ -1598,6 +1926,8 @@ class PlayerWindow(QMainWindow):
         self.artist_label.setText("Unknown artist")
         self.album_label.setText("Unknown album")
         self.set_cover_placeholder()
+        self.position_slider.set_waveform([])
+        self.update_buffer_progress(0.0)
         self.status_label.setText("Playlist cleared")
         self.emit_mpris_properties_changed("org.mpris.MediaPlayer2.Player", {
             "Metadata": self.mpris_metadata(),
@@ -1933,6 +2263,28 @@ class PlayerWindow(QMainWindow):
         return None
 
     def on_media_status_changed(self, status: QMediaPlayer.MediaStatus) -> None:
+        loading_states = {
+            QMediaPlayer.LoadingMedia,
+            QMediaPlayer.BufferingMedia,
+        }
+        ready_states = {
+            QMediaPlayer.LoadedMedia,
+            QMediaPlayer.BufferedMedia,
+        }
+
+        if status in loading_states:
+            self.start_buffer_progress_monitor()
+            self.poll_buffer_progress()
+        elif status in ready_states:
+            self.poll_buffer_progress()
+            self.stop_buffer_progress_monitor()
+        elif status in {QMediaPlayer.NoMedia, QMediaPlayer.InvalidMedia, QMediaPlayer.EndOfMedia}:
+            self.stop_buffer_progress_monitor()
+            self.update_buffer_progress(0.0)
+
+        if self.current_index is not None and status in ready_states:
+            self.request_waveform_generation(self.current_index)
+
         if status != QMediaPlayer.EndOfMedia:
             return
 
@@ -1947,6 +2299,7 @@ class PlayerWindow(QMainWindow):
             return
 
         self.pending_position = self.player.position()
+        self.update_buffer_progress(0.0)
         self.playlist[self.current_index].stream_url = ""
         self.status_label.setText("Restarting stream...")
         self.resolve_item(self.current_index, auto_play=True)
@@ -1963,6 +2316,7 @@ class PlayerWindow(QMainWindow):
 
         self.restart_attempts += 1
         self.pending_position = self.player.position()
+        self.update_buffer_progress(0.0)
         self.status_label.setText(
             f"Stream error, restarting ({self.restart_attempts}/{self.MAX_RESTARTS})..."
         )
@@ -1983,6 +2337,89 @@ class PlayerWindow(QMainWindow):
         elif self.player.mediaStatus() == QMediaPlayer.EndOfMedia:
             self.stop_mpris_position_updates()
             self.set_mpris_playback_status("Stopped")
+
+    def _media_buffer_progress(self) -> float:
+        getter = getattr(self.player, "bufferProgress", None)
+        try:
+            progress = getter() if callable(getter) else getter
+        except Exception:
+            progress = 0.0
+        try:
+            return max(0.0, min(1.0, float(progress)))
+        except Exception:
+            return 0.0
+
+    def update_buffer_progress(self, progress: float) -> None:
+        progress = max(0.0, min(1.0, float(progress)))
+        self.position_slider.set_buffered_ratio(progress)
+        if self.current_index is not None and progress >= 0.99:
+            self.request_waveform_generation(self.current_index)
+
+    def start_buffer_progress_monitor(self) -> None:
+        if not self.buffer_progress_timer.isActive():
+            self.buffer_progress_timer.start()
+        self.poll_buffer_progress()
+
+    def stop_buffer_progress_monitor(self) -> None:
+        if self.buffer_progress_timer.isActive():
+            self.buffer_progress_timer.stop()
+
+    def poll_buffer_progress(self) -> None:
+        self.update_buffer_progress(self._media_buffer_progress())
+
+    def on_buffer_progress_changed(self, progress: float) -> None:
+        self.update_buffer_progress(progress)
+
+    def request_waveform_generation(self, index: int) -> None:
+        if index < 0 or index >= len(self.playlist):
+            return
+
+        item = self.playlist[index]
+        if item.waveform_ready or item.page_url in self.waveform_cache:
+            cached = self.waveform_cache.get(item.page_url)
+            if cached and not item.waveform:
+                item.waveform = cached
+                item.waveform_ready = True
+                if index == self.current_index:
+                    self.position_slider.set_waveform(cached)
+            return
+
+        if item.duration <= 0:
+            return
+
+        if index in self.waveform_generation_indexes:
+            return
+
+        self.waveform_generation_indexes.add(index)
+        task = WaveformTask(
+            index,
+            item.stream_url,
+            item.duration,
+            self.waveform_signals,
+            self.cookie_browser.currentData() or "",
+        )
+        task.setAutoDelete(True)
+        self.thread_pool.start(task)
+
+    def on_waveform_generated(self, index: int, waveform: object) -> None:
+        self.waveform_generation_indexes.discard(index)
+        if not isinstance(waveform, list):
+            return
+        if index < 0 or index >= len(self.playlist):
+            return
+
+        item = self.playlist[index]
+        cleaned = [min(1.0, max(0.0, float(level))) for level in waveform]
+        item.waveform = cleaned
+        item.waveform_ready = True
+        self.waveform_cache[item.page_url] = cleaned
+
+        if index == self.current_index:
+            self.position_slider.set_waveform(cleaned)
+
+    def on_waveform_failed(self, index: int, error: str) -> None:
+        self.waveform_generation_indexes.discard(index)
+        logging.warning("Waveform generation failed for index %s: %s", index, error)
 
     def on_audio_buffer_received(self, buffer) -> None:
         levels = self.audio_buffer_to_levels(buffer)
@@ -2101,12 +2538,13 @@ class PlayerWindow(QMainWindow):
     def apply_style(self) -> None:
         self.setStyleSheet(
             """
-            QMainWindow, QWidget {
-                /*background: #000000;*/
+            QMainWindow{
+                background: #191919;
                 color: #eeeeee;
                 font-family: "Noto Sans", "Segoe UI", sans-serif;
                 font-size: 13px;
             }
+
             #nowPlaying {
                 background: #171717;
                 border-bottom: 1px solid #232323;
@@ -2176,7 +2614,7 @@ class PlayerWindow(QMainWindow):
                 padding: 5px 8px;
             }
             QSlider::groove:horizontal {
-                background: #202020;
+                background: #000000;
                 height: 3px;
             }
             QSlider::handle:horizontal {
@@ -2186,6 +2624,11 @@ class PlayerWindow(QMainWindow):
             }
             QSlider::sub-page:horizontal {
                 background: #bdbdbd;
+            }
+            #waveformSeekBar {
+                background: #0b0b0b;
+                border: 1px solid #222222;
+                border-radius: 10px;
             }
             """
         )
