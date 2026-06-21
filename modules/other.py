@@ -8,7 +8,8 @@ from PySide6.QtGui import QColor,QPixmap, QPainter, QLinearGradient, QImage
 from PySide6.QtCore import QPropertyAnimation, QRect, QEasingCurve, Qt,QObject, QProcess,QParallelAnimationGroup
 import requests
 import __main__ 
-
+import re
+from urllib.parse import parse_qs, urlparse
 
 class GradientImageLabel(QLabel):
     def __init__(self, parent=None):
@@ -95,3 +96,64 @@ class GradientImageLabel(QLabel):
         super().resizeEvent(event)
         self.update_gradient_mask()
 
+
+
+def parse_youtube_link(url):
+    # Паттерн для чистого плейлиста (начинается с playlist?list=)
+    playlist_pattern = r'(?:https?:\/\/)?(?:www\.|m\.)?youtube\.com\/playlist\?(?:.*&)?list=([a-zA-Z0-9_-]+)'
+    
+    # Паттерн для видео (обычное, мобильное, короткое youtu.be или shorts)
+    video_pattern = r'(?:https?:\/\/)?(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})'
+    
+    # Паттерн для параметра list= в любой ссылке
+    list_param_pattern = r'[?&]list=([a-zA-Z0-9_-]+)'
+
+    # Проверяем, есть ли ID видео
+    video_match = re.search(video_pattern, url)
+    # Проверяем, есть ли ID плейлиста (как отдельный плейлист или параметр в видео)
+    playlist_match = re.search(playlist_pattern, url)
+    list_param_match = re.search(list_param_pattern, url)
+
+    if video_match and list_param_match:
+        return {
+            "type": "video&playlist",
+            "video_id": video_match.group(1),
+            "playlist_id": list_param_match.group(1)
+        }
+    elif playlist_match:
+        return {
+            "type": "playlist",
+            "playlist_id": playlist_match.group(1)
+        }
+    elif video_match:
+        return {
+            "type": "video",
+            "video_id": video_match.group(1)
+        }
+    else:
+        return {
+            "type": "Неизвестная ссылка или не YouTube"
+        }
+
+def extract_youtube_video_id(page_url: str) -> str:
+    parsed = urlparse(page_url)
+    query_id = parse_qs(parsed.query).get("v", [None])[0]
+    if query_id:
+        return str(query_id).strip()
+
+    path = parsed.path.strip("/")
+    if parsed.netloc in {"youtu.be", "www.youtu.be"} and path:
+        return path.split("/", 1)[0].strip()
+
+    match = re.search(
+        r"(?:v=|/shorts/|/live/|/embed/|youtu\.be/)([A-Za-z0-9_-]{6,})",
+        page_url,
+    )
+    if match:
+        return match.group(1).strip()
+
+    if path:
+        tail = path.split("/")[-1]
+        if len(tail) >= 6:
+            return tail.strip()
+    return ""

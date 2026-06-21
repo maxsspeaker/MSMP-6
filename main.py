@@ -60,7 +60,7 @@ from PySide6.QtWidgets import (
     QWidget,
     QMenu,
 )
-from modules.other import GradientImageLabel
+from modules.other import GradientImageLabel,extract_youtube_video_id,parse_youtube_link
 
 
 ERROR_REPORTER: Optional["ErrorReporter"] = None
@@ -141,28 +141,34 @@ class JamPlaylistSignals(QObject):
 class JamPlaylistTask(QRunnable):
     def __init__(
         self,
-        index: int,
+        index: Optional[int],
         page_url: str,
         signals: JamPlaylistSignals,
         cookie_browser: str = "",
+        JamPlaylist: bool = True,
     ) -> None:
         super().__init__()
         self.index = index
         self.page_url = page_url
         self.cookie_browser = cookie_browser
         self.signals = signals
+        self.JamPlaylist = JamPlaylist
 
     @Slot()
     def run(self) -> None:
         try:
-            video_id = PlayerWindow.extract_youtube_video_id(self.page_url)
-            if not video_id:
-                raise RuntimeError("Не удалось извлечь id видео из page_url")
+            if(self.JamPlaylist):
+                video_id = extract_youtube_video_id(self.page_url)
 
-            jam_url = (
-                "https://www.youtube.com/watch?v="
-                f"{video_id}&list=RD{video_id}&start_radio=1"
-            )
+                if not video_id:
+                    raise RuntimeError("Не удалось извлечь id видео из page_url")
+
+                jam_url = (
+                    "https://www.youtube.com/watch?v="
+                    f"{video_id}&list=RD{video_id}&start_radio=1"
+                    )
+            else:
+                jam_url=self.page_url
 
             print("Resolving playlist")
 
@@ -274,15 +280,19 @@ class YtdlpLogger:
     def debug(self, message: str) -> None:
         if(self.status):
             self.status.emit(message)
+        print("yt-dlp: %s", message)
         logging.debug("yt-dlp: %s", message)
 
     def warning(self, message: str) -> None:
+        print("yt-dlp: %s", message)
         logging.warning("yt-dlp: %s", message)
 
     def error(self, message: str) -> None:
+        print("yt-dlp: %s", message)
         logging.error("yt-dlp: %s", message)
 
     def info(self, message: str) -> None:
+        print("yt-dlp: %s", message)
         logging.info("yt-dlp: %s", message)
 
 
@@ -1542,8 +1552,20 @@ class PlayerWindow(QMainWindow):
         if not url:
             return
 
-        self.add_url_value(url)
+        parsed=parse_youtube_link(url)
+
+        if(parsed["type"]=="video&playlist"):
+            self.add_url_value(url)
+
+        elif(parsed["type"]=="playlist"):
+            self.parse_jam_playlist(url="https://www.youtube.com/playlist?list="+parsed["playlist_id"])
+        elif(parsed["type"]=="video"):
+            self.add_url_value(url)
+
+        print(parsed)
+
         self.url_input.clear()
+
 
     def add_url_value(self, url: str, auto_play: bool = False) -> None:
         row = len(self.playlist)
@@ -1577,17 +1599,25 @@ class PlayerWindow(QMainWindow):
         self.thread_pool.start(task)
 
 
-    def parse_jam_playlist(self, index: int) -> None:
-        if index < 0 or index >= len(self.playlist):
-            return
+    def parse_jam_playlist(self, index: Optional[int] = None,url: Optional[str] = None) -> None:
+        if(index):
+            if index < 0 or index >= len(self.playlist):
+                return
 
-        item = self.playlist[index]
-        self.status_label.setText("Parsing Jam playlist...")
+            item = self.playlist[index]
+            self.status_label.setText("Parsing Jam playlist...")
+            url=item.page_url
+            JamPlaylist=True
+        else:
+            self.status_label.setText("Parsing playlist...")  
+            JamPlaylist=False
+
         task = JamPlaylistTask(
             index,
-            item.page_url,
+            url,
             self.jam_signals,
             self.cookie_browser.currentData() or "",
+            JamPlaylist=JamPlaylist
         )
         task.setAutoDelete(True)
         self.thread_pool.start(task)
@@ -1601,7 +1631,7 @@ class PlayerWindow(QMainWindow):
 
     def on_jam_playlist_parsed(
         self,
-        index: int,
+        index: Optional[int],
         items: object,
         playlist_title: str,
     ) -> None:
@@ -1679,23 +1709,24 @@ class PlayerWindow(QMainWindow):
 
     def on_resolve_failed(
         self,
-        index: int,
+        index: Optional[int],
         error: str,
         details: str = "",
     ) -> None:
         self.resolving_indexes.discard(index)
-        self.resolve_autoplay.pop(index, None)
-        if 0 <= index < len(self.playlist):
-            item = self.playlist[index]
-            item.stream_url = ""
-            item.load_error = error
-            item.unavailable = is_video_unavailable_error(error)
-            if item.title == "Loading...":
-                item.title = "Video unavailable" if item.unavailable else "Resolve failed"
-            self.set_row(index, item)
-            title = item.page_url
-        else:
-            title = "item"
+        if(index):
+            self.resolve_autoplay.pop(index, None)
+            if 0 <= index < len(self.playlist):
+                item = self.playlist[index]
+                item.stream_url = ""
+                item.load_error = error
+                item.unavailable = is_video_unavailable_error(error)
+                if item.title == "Loading...":
+                    item.title = "Video unavailable" if item.unavailable else "Resolve failed"
+                self.set_row(index, item)
+                title = item.page_url
+            else:
+                title = "item"
 
         message = f"yt-dlp failed for {title}: {error}"
         self.status_label.setText(message)
@@ -2646,30 +2677,6 @@ class PlayerWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         self.mpris_server.stop()
         super().closeEvent(event)
-
-    @staticmethod
-    def extract_youtube_video_id(page_url: str) -> str:
-        parsed = urlparse(page_url)
-        query_id = parse_qs(parsed.query).get("v", [None])[0]
-        if query_id:
-            return str(query_id).strip()
-
-        path = parsed.path.strip("/")
-        if parsed.netloc in {"youtu.be", "www.youtu.be"} and path:
-            return path.split("/", 1)[0].strip()
-
-        match = re.search(
-            r"(?:v=|/shorts/|/live/|/embed/|youtu\.be/)([A-Za-z0-9_-]{6,})",
-            page_url,
-        )
-        if match:
-            return match.group(1).strip()
-
-        if path:
-            tail = path.split("/")[-1]
-            if len(tail) >= 6:
-                return tail.strip()
-        return ""
 
     @staticmethod
     def format_time(milliseconds: int) -> str:
