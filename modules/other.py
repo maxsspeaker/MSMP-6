@@ -1,0 +1,97 @@
+import random,hashlib
+import psutil,os,sys
+from PySide6.QtWidgets import (
+    QApplication, QWidget, QPushButton, QVBoxLayout,
+    QHBoxLayout, QGraphicsOpacityEffect, QLabel, QGraphicsBlurEffect
+)
+from PySide6.QtGui import QColor,QPixmap, QPainter, QLinearGradient, QImage
+from PySide6.QtCore import QPropertyAnimation, QRect, QEasingCurve, Qt,QObject, QProcess,QParallelAnimationGroup
+import requests
+import __main__ 
+
+
+class GradientImageLabel(QLabel):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.original_pixmap = QPixmap()
+        # ОТКЛЮЧАЕМ стандартное искажающее растягивание Qt
+        self.setScaledContents(False) 
+
+        self.blur_effect = QGraphicsBlurEffect()
+        self.blur_effect.setBlurRadius(16)
+        self.setGraphicsEffect(self.blur_effect)
+        
+    def set_new_image(self, image_source):
+        """Динамически принимает путь к файлу (str) или готовый QPixmap"""
+        if isinstance(image_source, QPixmap):
+            self.original_pixmap = image_source
+        else:
+            self.original_pixmap = QPixmap(str(image_source))
+            
+        self.update_gradient_mask()
+
+    def update_gradient_mask(self):
+        if self.original_pixmap.isNull():
+            return
+
+        # Получаем текущие размеры самого виджета QLabel
+        target_width = self.width()
+        target_height = self.height()
+        
+        if target_width <= 0 or target_height <= 0:
+            return
+
+        # 1. Конвертируем оригинал в QImage с поддержкой Альфа-канала
+        src_image = self.original_pixmap.toImage().convertToFormat(QImage.Format.Format_ARGB32_Premultiplied)
+        
+        # 2. РАСЧЕТ КАДРИРОВАНИЯ И ЦЕНТРИРОВАНИЯ (Аналог object-fit: cover)
+        src_width = src_image.width()
+        src_height = src_image.height()
+        
+        # Вычисляем коэффициенты масштабирования
+        scale_w = target_width / src_width
+        scale_h = target_height / src_height
+        scale = max(scale_w, scale_h) # Берем максимальный, чтобы залить всю площадь
+        
+        # Размеры картинки после пропорционального масштабирования
+        new_w = int(src_width * scale)
+        new_h = int(src_height * scale)
+        
+        # Масштабируем исходное изображение сглаженным алгоритмом
+        scaled_image = src_image.scaled(new_w, new_h, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        
+        # Находим координаты для вырезания центральной части (центрирование)
+        crop_x = (new_w - target_width) // 2
+        crop_y = (new_h - target_height) // 2
+        
+        # Вырезаем кадр точно под размер QLabel
+        cropped_image = scaled_image.copy(QRect(crop_x, crop_y, target_width, target_height))
+
+        # 3. НАЛОЖЕНИЕ ГРАДИЕНТА ПРОЗРАЧНОСТИ
+        # Создаем пустой холст строго под размер QLabel и заливаем прозрачностью
+        result_image = QImage(target_width, target_height, QImage.Format.Format_ARGB32_Premultiplied)
+        result_image.fill(QColor(0, 0, 0, 0)) 
+        
+        painter = QPainter(result_image)
+        # Рисуем уже отцентрированный и обрезанный кадр
+        painter.drawImage(0, 0, cropped_image)
+        
+        # Применяем маску прозрачности
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
+        
+        # Линейный градиент сверху вниз по размеру виджета
+        gradient = QLinearGradient(0, 0, 0, target_height)
+        gradient.setColorAt(0.95, QColor(0, 0, 0, 0))    # Прозрачный верх
+        gradient.setColorAt(0.6, QColor(0, 0, 0, 128))  # Непрозрачный низ
+        
+        painter.fillRect(result_image.rect(), gradient)
+        painter.end()
+        
+        # Выводим в QLabel
+        self.setPixmap(QPixmap.fromImage(result_image))
+
+    def resizeEvent(self, event):
+        """При ресайзе картинка автоматически перекадрируется и центрируется заново"""
+        super().resizeEvent(event)
+        self.update_gradient_mask()
+

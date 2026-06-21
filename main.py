@@ -60,7 +60,7 @@ from PySide6.QtWidgets import (
     QWidget,
     QMenu,
 )
-from PySide6 import QtSvg
+from modules.other import GradientImageLabel
 
 
 ERROR_REPORTER: Optional["ErrorReporter"] = None
@@ -83,7 +83,7 @@ VISUALIZER_MIN_VISIBLE_LEVEL = 0.012
 #VISUALIZER_WINDOW_WIDTH = 250
 #VISUALIZER_WINDOW_HEIGHT = 128
 VISUALIZER_BACKGROUND_COLOR = "#000000"
-VISUALIZER_TRACK_COLOR = "#000000"
+VISUALIZER_TRACK_COLOR = "#00000000"
 VISUALIZER_BAR_COLOR_LOW = "#7CFF6B"
 VISUALIZER_BAR_COLOR_MID = "#D7FF4A"
 VISUALIZER_BAR_COLOR_HIGH = "#FFB347"
@@ -93,7 +93,7 @@ VISUALIZER_PEAK_HEIGHT = 3.0
 VISUALIZER_CORNER_RADIUS = 3
 
 WAVEFORM_BIN_COUNT = 440
-WAVEFORM_BACKGROUND_COLOR = "#000000"
+WAVEFORM_BACKGROUND_COLOR = "#00000000"
 WAVEFORM_TRACK_COLOR = "#232323"
 WAVEFORM_BUFFER_COLOR = "#7c7c7c"
 WAVEFORM_PLAYED_COLOR = "#e8e8e8"
@@ -400,6 +400,7 @@ class VisualizerWindow(QWidget):
         #self.resize(VISUALIZER_WINDOW_WIDTH, VISUALIZER_WINDOW_HEIGHT)
         self.levels = [0.0] * VISUALIZER_BAR_COUNT
         self.peaks = [0.0] * VISUALIZER_BAR_COUNT
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
 
     def set_levels(self, levels: list[float], peaks: Optional[list[float]] = None) -> None:
         if not levels:
@@ -443,7 +444,7 @@ class VisualizerWindow(QWidget):
     def paintEvent(self, _event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.fillRect(self.rect(), QColor(VISUALIZER_BACKGROUND_COLOR))
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 0))
 
         width = max(1.0, float(self.width()))
         height = max(1.0, float(self.height()))
@@ -481,6 +482,7 @@ class VisualizerWindow(QWidget):
             top_color = top_color.lighter(145)
             bottom_color = QColor(color)
             bottom_color = bottom_color.darker(120)
+            #bottom_color.setAlpha(100)
 
             gradient = QLinearGradient(x, bar_top, x, base_y)
             gradient.setColorAt(0.0, top_color)
@@ -606,8 +608,8 @@ class WaveformSeekBar(QWidget):
             return
 
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor("#141414"))
-        painter.drawRoundedRect(outer, 8, 8)
+        #painter.setBrush(QColor("#141414"))
+        #painter.drawRoundedRect(outer, 0, 0)
 
         inner = outer.adjusted(10, 3, -10, -3)
         if inner.width() <= 0 or inner.height() <= 0:
@@ -1260,7 +1262,7 @@ class PlayerWindow(QMainWindow):
 
         self.visualizer_window = VisualizerWindow()
         self.visualizer_window.set_levels(self.visualizer_levels, self.visualizer_peaks)
-        self.visualizer_window.show()
+        #self.visualizer_window.hide()
         #self.visualizer_window.raise_()
         self.visualizer_window.activateWindow()
         self.visualizer_window.setFixedSize(233,128)
@@ -1306,12 +1308,20 @@ class PlayerWindow(QMainWindow):
 
         self.NowDisplay = QWidget(self)
         self.NowDisplay.setObjectName("NowDisplay")
+        self.NowDisplay.setFixedHeight(210)
 
         self.cover_label = QLabel()
         self.cover_label.setFixedSize(128, 128)
         self.cover_label.setAlignment(Qt.AlignCenter)
         self.cover_label.setObjectName("cover")
+
+        self.cover_background = GradientImageLabel(self.NowDisplay)
+        self.cover_background.setAlignment(Qt.AlignCenter)
+        self.cover_background.setScaledContents(True)
+        self.cover_background.setFixedHeight(210)
+
         self.set_cover_placeholder()
+
 
         self.track_title_label = QLabel("No track")
         self.track_title_label.setObjectName("trackTitle")
@@ -1463,21 +1473,25 @@ class PlayerWindow(QMainWindow):
         meta_layout.addStretch(1)
 
         now_playing_layout = QVBoxLayout()
-        now_playing_layout.setContentsMargins(12, 12, 12, 12)
+        now_playing_layout.setContentsMargins(8, 8, 8, 8)
 
         NowDisplayLayout=QVBoxLayout()
 
         playNow_layout = QHBoxLayout()
-        playNow_layout.setContentsMargins(12, 12, 12, 12)
+        playNow_layout.setContentsMargins(16, 16,16, 0)
         playNow_layout.addWidget(self.cover_label)
         playNow_layout.addLayout(meta_layout, 1)
         playNow_layout.addWidget(self.visualizer_window)
 
         NowDisplayLayout.addLayout(playNow_layout, 1)
         NowDisplayLayout.addWidget(self.position_slider)
+        NowDisplayLayout.setContentsMargins(0, 0, 0, 0)
 
 
         self.NowDisplay.setLayout(NowDisplayLayout)
+        self.cover_background.lower()
+        self.cover_background.setGeometry(self.NowDisplay.rect())
+
         #now_playing_layout.addLayout(controls_layout)
 
         control_layout = QVBoxLayout()
@@ -1518,6 +1532,10 @@ class PlayerWindow(QMainWindow):
         self.setup_mpris()
 
         self.discordrpc=discordrpcWrapper(self)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.cover_background.setGeometry(0, 0, self.width(), self.height())
 
     def add_url(self) -> None:
         url = self.url_input.text().strip()
@@ -1798,15 +1816,6 @@ class PlayerWindow(QMainWindow):
             "PlaybackStatus": status,
         })
 
-    def show_visualizer(self) -> None:
-        if self.visualizer_window is None:
-            self.visualizer_window = VisualizerWindow()
-            self.visualizer_window.destroyed.connect(self.on_visualizer_closed)
-        self.visualizer_window.set_levels(self.visualizer_levels, self.visualizer_peaks)
-        self.visualizer_window.show()
-        self.visualizer_window.raise_()
-        self.visualizer_window.activateWindow()
-
     def on_visualizer_closed(self, _obj=None) -> None:
         self.visualizer_window = None
 
@@ -2076,8 +2085,8 @@ class PlayerWindow(QMainWindow):
     def set_cover_placeholder(self) -> None:
         pixmap = QPixmap(self.cover_label.size())
         pixmap.fill(Qt.black)
+        self.cover_background.set_new_image(QPixmap("Logos/MSMPwaveHero.png"))
         self.cover_label.setPixmap(pixmap)
-        self.cover_label.setText("")
 
     def on_artwork_loaded(self, reply) -> None:
         data = reply.readAll()
@@ -2089,6 +2098,7 @@ class PlayerWindow(QMainWindow):
                 Qt.SmoothTransformation,
             )
             self.cover_label.setPixmap(scaled)
+            self.cover_background.set_new_image(scaled)
         else:
             self.set_cover_placeholder()
         reply.deleteLater()
