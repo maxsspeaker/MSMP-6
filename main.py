@@ -1,4 +1,3 @@
-import asyncio
 import json
 import logging
 import random
@@ -8,7 +7,6 @@ import sys
 import threading
 import traceback
 import time
-import discordrpc
 import os
 from dataclasses import dataclass, field
 from typing import Optional
@@ -20,10 +18,8 @@ import subprocess
 import tempfile
 
 import yt_dlp
+
 from dbus_next import Variant
-from dbus_next.aio import MessageBus
-from dbus_next.constants import PropertyAccess
-from dbus_next.service import ServiceInterface, dbus_property, method, signal
 from PySide6.QtCore import (
     QObject,
     QRunnable,
@@ -61,6 +57,9 @@ from PySide6.QtWidgets import (
     QMenu,
 )
 from modules.other import GradientImageLabel,extract_youtube_video_id,parse_youtube_link
+from modules.discordrpcWrapper import discordrpcWrapper
+from modules.types import *
+from modules.dbus import MprisServer
 
 
 ERROR_REPORTER: Optional["ErrorReporter"] = None
@@ -99,23 +98,6 @@ WAVEFORM_BUFFER_COLOR = "#7c7c7c"
 WAVEFORM_PLAYED_COLOR = "#e8e8e8"
 WAVEFORM_HANDLE_COLOR = "#f2f2f2"
 WAVEFORM_HEIGHT = 44
-
-
-@dataclass
-class PlaylistItem:
-    page_url: str
-    title: str = "Loading..."
-    stream_url: str = ""
-    duration: int = 0
-    source_id: str = "youtube"
-    uploader: str = ""
-    album: str = ""
-    artwork_url: str = ""
-    publis: bool = False
-    unavailable: bool = False
-    load_error: str = ""
-    waveform: list[float] = field(default_factory=list)
-    waveform_ready: bool = False
 
 
 def is_video_unavailable_error(error: str) -> bool:
@@ -169,6 +151,8 @@ class JamPlaylistTask(QRunnable):
                     )
             else:
                 jam_url=self.page_url
+
+            print(jam_url)
 
             print("Resolving playlist")
 
@@ -800,408 +784,10 @@ class WaveformTask(QRunnable):
         return [min(1.0, max(0.0, (value / peak) ** 0.82)) for value in waveform]
 
 
-class MprisCommandBridge(QObject):
-    play_requested = Signal()
-    pause_requested = Signal()
-    stop_requested = Signal()
-    next_requested = Signal()
-    previous_requested = Signal()
-    raise_requested = Signal()
-    quit_requested = Signal()
-    seek_requested = Signal(int)
-    set_position_requested = Signal(int)
-    open_uri_requested = Signal(str)
-    loop_status_requested = Signal(str)
-    shuffle_requested = Signal(bool)
-    volume_requested = Signal(float)
-
-
-class MprisRootInterface(ServiceInterface):
-    def __init__(self, server: "MprisServer") -> None:
-        super().__init__("org.mpris.MediaPlayer2")
-        self.server = server
-
-    @method()
-    def Raise(self) -> "":
-        self.server.bridge.raise_requested.emit()
-
-    @method()
-    def Quit(self) -> "":
-        self.server.bridge.quit_requested.emit()
-
-    @dbus_property(access=PropertyAccess.READ)
-    def CanQuit(self) -> "b":
-        return True
-
-    @dbus_property(access=PropertyAccess.READ)
-    def CanRaise(self) -> "b":
-        return True
-
-    @dbus_property(access=PropertyAccess.READ)
-    def HasTrackList(self) -> "b":
-        return False
-
-    @dbus_property(access=PropertyAccess.READ)
-    def Identity(self) -> "s":
-        return "MSMP5"
-
-    @dbus_property(access=PropertyAccess.READ)
-    def DesktopEntry(self) -> "s":
-        return "msmp5"
-
-    @dbus_property(access=PropertyAccess.READ)
-    def SupportedUriSchemes(self) -> "as":
-        return ["file", "http", "https"]
-
-    @dbus_property(access=PropertyAccess.READ)
-    def SupportedMimeTypes(self) -> "as":
-        return ["audio/mpeg", "audio/mp4", "audio/ogg", "audio/x-wav"]
-
-
-class MprisPlayerInterface(ServiceInterface):
-    def __init__(self, server: "MprisServer") -> None:
-        super().__init__("org.mpris.MediaPlayer2.Player")
-        self.server = server
-
-    @method()
-    def Next(self) -> "":
-        self.server.bridge.next_requested.emit()
-
-    @method()
-    def Previous(self) -> "":
-        self.server.bridge.previous_requested.emit()
-
-    @method()
-    def Pause(self) -> "":
-        self.server.bridge.pause_requested.emit()
-
-    @method()
-    def PlayPause(self) -> "":
-        if self.server.get("PlaybackStatus") == "Playing":
-            self.server.bridge.pause_requested.emit()
-        else:
-            self.server.bridge.play_requested.emit()
-
-    @method()
-    def Stop(self) -> "":
-        self.server.bridge.stop_requested.emit()
-
-    @method()
-    def Play(self) -> "":
-        self.server.bridge.play_requested.emit()
-
-    @method()
-    def Seek(self, Offset: "x") -> "":
-        self.server.bridge.seek_requested.emit(int(Offset // 1000))
-
-    @method()
-    def SetPosition(self, TrackId: "o", Position: "x") -> "":
-        self.server.bridge.set_position_requested.emit(max(0, int(Position // 1000)))
-
-    @method()
-    def OpenUri(self, Uri: "s") -> "":
-        self.server.bridge.open_uri_requested.emit(Uri)
-
-    @signal()
-    def Seeked(self, Position: "x") -> "x":
-        return Position
-
-    @dbus_property(access=PropertyAccess.READ)
-    def PlaybackStatus(self) -> "s":
-        return self.server.get("PlaybackStatus")
-
-    @dbus_property(access=PropertyAccess.READWRITE)
-    def LoopStatus(self) -> "s":
-        return self.server.get("LoopStatus")
-
-    @LoopStatus.setter
-    def LoopStatus(self, value: "s") -> None:
-        self.server.bridge.loop_status_requested.emit(value)
-
-    @dbus_property(access=PropertyAccess.READWRITE)
-    def Rate(self) -> "d":
-        return 1.0
-
-    @Rate.setter
-    def Rate(self, value: "d") -> None:
-        return None
-
-    @dbus_property(access=PropertyAccess.READWRITE)
-    def Shuffle(self) -> "b":
-        return self.server.get("Shuffle")
-
-    @Shuffle.setter
-    def Shuffle(self, value: "b") -> None:
-        self.server.bridge.shuffle_requested.emit(bool(value))
-
-    @dbus_property(access=PropertyAccess.READ)
-    def Metadata(self) -> "a{sv}":
-        return self.server.get("Metadata")
-
-    @dbus_property(access=PropertyAccess.READWRITE)
-    def Volume(self) -> "d":
-        return self.server.get("Volume")
-
-    @Volume.setter
-    def Volume(self, value: "d") -> None:
-        self.server.bridge.volume_requested.emit(min(1.0, max(0.0, float(value))))
-
-    @dbus_property(access=PropertyAccess.READ)
-    def Position(self) -> "x":
-        return self.server.get("Position")
-
-    @dbus_property(access=PropertyAccess.READ)
-    def MinimumRate(self) -> "d":
-        return 1.0
-
-    @dbus_property(access=PropertyAccess.READ)
-    def MaximumRate(self) -> "d":
-        return 1.0
-
-    @dbus_property(access=PropertyAccess.READ)
-    def CanGoNext(self) -> "b":
-        return self.server.get("CanGoNext")
-
-    @dbus_property(access=PropertyAccess.READ)
-    def CanGoPrevious(self) -> "b":
-        return self.server.get("CanGoPrevious")
-
-    @dbus_property(access=PropertyAccess.READ)
-    def CanPlay(self) -> "b":
-        return self.server.get("CanPlay")
-
-    @dbus_property(access=PropertyAccess.READ)
-    def CanPause(self) -> "b":
-        return True
-
-    @dbus_property(access=PropertyAccess.READ)
-    def CanSeek(self) -> "b":
-        return self.server.get("CanSeek")
-
-    @dbus_property(access=PropertyAccess.READ)
-    def CanControl(self) -> "b":
-        return True
-
-
-class MprisServer:
-    PATH = "/org/mpris/MediaPlayer2"
-
-    def __init__(self) -> None:
-        self.service_name = "org.mpris.MediaPlayer2.msmp5"
-        self.bridge = MprisCommandBridge()
-        self.lock = threading.RLock()
-        self.state = {
-            "PlaybackStatus": "Stopped",
-            "LoopStatus": "None",
-            "Rate": 1.0,
-            "Shuffle": False,
-            "Metadata": self.empty_metadata(),
-            "Volume": 0.8,
-            "Position": 0,
-            "MinimumRate": 1.0,
-            "MaximumRate": 1.0,
-            "CanGoNext": False,
-            "CanGoPrevious": False,
-            "CanPlay": False,
-            "CanPause": True,
-            "CanSeek": False,
-            "CanControl": True,
-        }
-        self.loop: Optional[asyncio.AbstractEventLoop] = None
-        self.bus: Optional[MessageBus] = None
-        self.root_interface: Optional[MprisRootInterface] = None
-        self.player_interface: Optional[MprisPlayerInterface] = None
-        self.thread: Optional[threading.Thread] = None
-
-    @staticmethod
-    def empty_metadata() -> dict[str, Variant]:
-        return {
-            "mpris:trackid": Variant("o", "/org/mpris/MediaPlayer2/Track/NoTrack"),
-        }
-
-    def start(self) -> None:
-        if not sys.platform.startswith("linux") or self.thread is not None:
-            return
-        self.thread = threading.Thread(target=self.run_thread, name="MPRIS", daemon=True)
-        self.thread.start()
-
-    def run_thread(self) -> None:
-        try:
-            asyncio.run(self.run_async())
-        except BaseException as exc:
-            logging.warning("MPRIS disabled: %s", exc)
-
-    async def run_async(self) -> None:
-        self.loop = asyncio.get_running_loop()
-        self.bus = await MessageBus().connect()
-        self.root_interface = MprisRootInterface(self)
-        self.player_interface = MprisPlayerInterface(self)
-        self.bus.export(self.PATH, self.root_interface)
-        self.bus.export(self.PATH, self.player_interface)
-        await self.bus.request_name(self.service_name)
-        await asyncio.Event().wait()
-
-    def stop(self) -> None:
-        loop = self.loop
-        if loop is None:
-            return
-        loop.call_soon_threadsafe(self.stop_in_loop)
-        self.loop = None
-
-    def stop_in_loop(self) -> None:
-        if self.bus is not None:
-            self.bus.disconnect()
-        loop = asyncio.get_running_loop()
-        loop.stop()
-
-    def get(self, key: str):
-        with self.lock:
-            return self.state[key]
-
-    def update(self, changed: dict) -> None:
-        with self.lock:
-            self.state.update(changed)
-        interface = self.player_interface
-        loop = self.loop
-        if interface is not None and loop is not None:
-            loop.call_soon_threadsafe(interface.emit_properties_changed, changed, [])
-
-    def seeked(self, position_ms: int) -> None:
-        interface = self.player_interface
-        loop = self.loop
-        if interface is not None and loop is not None:
-            loop.call_soon_threadsafe(interface.Seeked, int(position_ms * 1000))
-
-class discordrpcWrapper:
-    def __init__(self,MainWindow):
-        try:
-            print("connecting to discordrpc")
-            self.rpc = discordrpc.RPC(app_id=811577404279619634)
-        except Exception:
-            self.rpc = None
-
-        self.MainWindow=MainWindow
-        self.Status="Stopped"
-
-        self.itemSelected=None
-        self.position=0
-
-        try:
-            self.rpc.set_activity(
-                        state=None,
-                        details=None,
-                        act_type=discordrpc.Activity.Listening,
-                        large_image="msmpwave",
-                        small_image=self.Status.lower(),
-                        small_text=self.Status,
-                        large_text=None
-                        )
-        except:
-            self.rpc = None
-
-
-    def set_activity(self, item: PlaylistItem) -> None:
-        self.itemSelected=item
-
-        self.position=int(self.MainWindow.player.position()/1000)
-
-        #print(self.itemSelected.artwork_url)
-
-        #self.track_title_label.setText(item.title or "No track")
-        #self.artist_label.setText(item.uploader or "Unknown artist")
-        #self.album_label.setText(item.album or self.playlist_title or "Unknown album")
-        if(self.rpc):
-            if not(self.Status=="Playing"):
-                ts_start=None
-                ts_end=None
-            else:
-                ts_start=int(time.time()) - self.position
-                ts_end=int(time.time()) + self.itemSelected.duration - self.position
-            try:
-                self.rpc.set_activity(
-                    state=self.itemSelected.uploader or "Unknown artist",
-                    details=self.itemSelected.title,
-                    act_type=discordrpc.Activity.Listening,
-                    ts_start=ts_start,
-                    ts_end=ts_end,
-                    large_image=self.itemSelected.artwork_url,
-                    small_image=self.Status.lower(),
-                    small_text=self.Status,
-                    large_text=self.itemSelected.album or self.MainWindow.playlist_title or None
-                    )
-            except:
-                self.rpc = None
-    def set_playback_status(self, status: str) -> None:
-        if status not in {"Playing", "Paused", "Stopped"}:
-            return
-
-        self.Status=status
-        self.position=int(self.MainWindow.player.position()/1000)
-        print(self.position)
-
-        if(self.rpc):
-            try:
-                ts_start=None
-                ts_end=None
-                if (self.Status=="Playing"):
-                    ts_start=int(time.time()) - self.position
-                    ts_end=int(time.time()) + self.itemSelected.duration - self.position
-                elif(self.Status=="Stopped"):
-                    self.rpc.set_activity(
-                        state=None,
-                        details=None,
-                        act_type=discordrpc.Activity.Listening,
-                        ts_start=ts_start,
-                        ts_end=ts_end,
-                        large_image="msmpwave",
-                        small_image=self.Status.lower(),
-                        small_text=self.Status,
-                        large_text=None
-                        )
-                    return
-            
-                self.rpc.set_activity(
-                    state=self.itemSelected.uploader or "Unknown artist",
-                    details=self.itemSelected.title,
-                    act_type=discordrpc.Activity.Listening,
-                    ts_start=ts_start,
-                    ts_end=ts_end,
-                    large_image=self.itemSelected.artwork_url,
-                    small_image=self.Status.lower(),
-                    small_text=self.Status,
-                    large_text=self.itemSelected.album or self.MainWindow.playlist_title or None
-                    )
-            except:
-                self.rpc = None
-    def sync_position(self, position_ms: int) -> None:
-        self.position=int(position_ms/1000)
-        if(self.rpc):
-            if not(self.Status=="Playing"):
-                ts_start=None
-                ts_end=None
-            else:
-                ts_start=int(time.time()) - self.position
-                ts_end=int(time.time()) + self.itemSelected.duration - self.position
-            try:
-                self.rpc.set_activity(
-                    state=self.itemSelected.uploader or "Unknown artist",
-                    details=self.itemSelected.title,
-                    act_type=discordrpc.Activity.Listening,
-                    ts_start=ts_start,
-                    ts_end=ts_end,
-                    large_image=self.itemSelected.artwork_url,
-                    small_image=self.Status.lower(),
-                    small_text=self.Status,
-                    large_text=self.itemSelected.album or self.MainWindow.playlist_title or None
-                    )
-            except:
-                self.rpc = None
-
-
 
 class PlayerWindow(QMainWindow):
     MAX_RESTARTS = 3
-    PLAY_MODES_icons = ("assets/arrow-s-right.svg", "assets/out-loop.svg", "assets/loop.svg", "assets/shuffle.svg")
+    PLAY_MODES_icons = ("resources/arrow-s-right.svg", "resources/out-loop.svg", "resources/loop.svg", "resources/shuffle.svg")
     PLAY_MODES = ("Seq", "One", "All", "Rnd")
 
 
@@ -1243,7 +829,7 @@ class PlayerWindow(QMainWindow):
         self.setWindowTitle("MSMP FoxWave")
         self.resize(820, 760)
 
-        self.setWindowIcon(QIcon("assets/MSMPicon.png"))
+        self.setWindowIcon(QIcon("resources/MSMPicon.png"))
 
         self.playlist: list[PlaylistItem] = []
         self.current_index: Optional[int] = None
@@ -1360,27 +946,27 @@ class PlayerWindow(QMainWindow):
         self.cookie_browser.addItem("Edge cookies", "edge")
 
         self.play_button = QPushButton()
-        self.play_button.setIcon(QIcon("assets/play.svg"))
+        self.play_button.setIcon(QIcon("resources/play.svg"))
         self.play_button.setIconSize(QSize(26, 26))
 
         self.pause_button = QPushButton()
-        self.pause_button.setIcon(QIcon("assets/pause.svg"))
+        self.pause_button.setIcon(QIcon("resources/pause.svg"))
         self.pause_button.setIconSize(QSize(26, 26))
 
         self.stop_button = QPushButton()
-        self.stop_button.setIcon(QIcon("assets/stop.svg"))
+        self.stop_button.setIcon(QIcon("resources/stop.svg"))
         self.stop_button.setIconSize(QSize(26, 26))
 
         self.prev_button = QPushButton()
-        self.prev_button.setIcon(QIcon("assets/previous.svg"))
+        self.prev_button.setIcon(QIcon("resources/previous.svg"))
         self.prev_button.setIconSize(QSize(26, 26))
 
         self.next_button = QPushButton()
-        self.next_button.setIcon(QIcon("assets/next.svg"))
+        self.next_button.setIcon(QIcon("resources/next.svg"))
         self.next_button.setIconSize(QSize(26, 26))
 
         self.restart_button = QPushButton()
-        self.restart_button.setIcon(QIcon("assets/reload-audio.svg"))
+        self.restart_button.setIcon(QIcon("resources/reload-audio.svg"))
         self.restart_button.setIconSize(QSize(26, 26))
 
         #self.visualizer_button = QPushButton("Levels")
@@ -1599,8 +1185,8 @@ class PlayerWindow(QMainWindow):
         self.thread_pool.start(task)
 
 
-    def parse_jam_playlist(self, index: Optional[int] = None,url: Optional[str] = None) -> None:
-        if(index):
+    def parse_jam_playlist(self, index: Optional[int]=None,url: Optional[str] = None) -> None:
+        if not(index==None):
             if index < 0 or index >= len(self.playlist):
                 return
 
@@ -2392,6 +1978,8 @@ class PlayerWindow(QMainWindow):
 
     def update_buffer_progress(self, progress: float) -> None:
         progress = max(0.0, min(1.0, float(progress)))
+        if(progress==0.25):
+            return
         self.position_slider.set_buffered_ratio(progress)
         if self.current_index is not None and progress >= 0.99:
             self.request_waveform_generation(self.current_index)
