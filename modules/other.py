@@ -2,16 +2,17 @@ import random,hashlib
 import os,sys
 from PySide6.QtWidgets import (
     QApplication, QWidget, QPushButton, QVBoxLayout,
-    QHBoxLayout, QGraphicsOpacityEffect, QLabel, QGraphicsBlurEffect
+    QHBoxLayout, QGraphicsOpacityEffect, QLabel, QGraphicsBlurEffect,QComboBox,QFrame,QStyleOptionViewItem,QListView,QStyledItemDelegate, QStyle
 )
-from PySide6.QtGui import QColor,QPixmap, QPainter, QLinearGradient, QImage
-from PySide6.QtCore import QPropertyAnimation, QRect, QEasingCurve, Qt,QObject, QProcess,QParallelAnimationGroup
+from PySide6.QtGui import QColor,QPixmap, QPainter, QLinearGradient, QImage,QPalette, QPen, QBrush
+from PySide6.QtCore import QPropertyAnimation, QRect, QEasingCurve, Qt,QObject, QProcess,QParallelAnimationGroup,QSize
 import __main__ 
 import re
 from urllib.parse import parse_qs, urlparse
 import subprocess
 import shutil
 import json
+
 
 class GradientImageLabel(QLabel):
     def __init__(self, parent=None):
@@ -138,13 +139,22 @@ def parse_youtube_link(url):
         }
 
 def get_ytdlp_executable() -> str:
+    if (sys.platform == "win32"):
+        if "__compiled__" in globals():
+            app_path = os.path.dirname(os.path.abspath(sys.argv[0]))
+        else:
+            app_path = os.path.dirname(os.path.abspath(sys.modules['__main__'].__file__))
+
+        print(os.path.join(app_path,"external","yt-dlp","yt-dlp.exe"))
+        return os.path.join(app_path,"external","yt-dlp","yt-dlp.exe")
+
     candidates = [
         os.environ.get("YTDLP_PATH", "").strip(),
         os.environ.get("YTDLP_BIN", "").strip(),
         shutil.which("yt-dlp") or "",
         shutil.which("yt-dlp.exe") or "",
     ]
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+    script_dir = os.path.dirname(os.path.abspath(sys.modules['__main__'].__file__))
     candidates.extend(
         [
             os.path.join(script_dir, "yt-dlp"),
@@ -161,6 +171,36 @@ def get_ytdlp_executable() -> str:
     )
 
 
+
+def get_ffmpeg_executable() -> str:
+    if (sys.platform == "win32"):
+        if "__compiled__" in globals():
+            app_path = os.path.dirname(os.path.abspath(sys.argv[0]))
+        else:
+            app_path = os.path.dirname(os.path.abspath(sys.modules['__main__'].__file__))
+
+        print(os.path.join(app_path,"external","ffmpeg","ffmpeg.exe"))
+        return os.path.join(app_path,"external","ffmpeg","ffmpeg.exe")
+
+    candidates = [
+        os.environ.get("FFMPEG_PATH", "").strip(),
+        os.environ.get("FFMPEG_BIN", "").strip(),
+        shutil.which("ffmpeg") or "",
+        shutil.which("ffmpeg.exe") or "",
+    ]
+    script_dir = os.path.dirname(os.path.abspath(sys.modules['__main__'].__file__))
+    candidates.extend(
+        [
+            os.path.join(script_dir, "ffmpeg"),
+            os.path.join(script_dir, "ffmpeg.exe"),
+        ]
+    )
+
+    for candidate in candidates:
+        if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+
+    return None
 
 def extract_youtube_video_id(page_url: str) -> str:
     parsed = urlparse(page_url)
@@ -236,3 +276,80 @@ def build_ytdlp_browser_args(cookie_browser: str) -> list[str]:
     if not browser:
         return []
     return ["--cookies-from-browser", browser]
+
+
+class NoFocusDelegate(QStyledItemDelegate):
+    """Я ненавижу WINDOWS, исправление отображения QComboBox"""
+    def paint(self, painter, option, index):
+
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        opt.state &= ~QStyle.State_HasFocus  # убираем флаг фокуса
+
+        painter.save()
+        
+
+        rect = opt.rect
+        painter.setPen(Qt.NoPen)
+        
+        if opt.state & QStyle.State_Selected:
+            painter.setBrush(QColor("#3a3a3a"))
+        elif opt.state & QStyle.State_MouseOver:
+            painter.setBrush(QColor("#2d2d2d"))
+        else:
+            painter.setBrush(QColor("#1e1e1e"))
+        
+        painter.drawRect(rect)
+        
+        # Рисуем текст
+        text = index.data(Qt.DisplayRole)
+        if text:
+            # Настройка шрифта и цвета
+            painter.setPen(QColor("white"))
+            font = painter.font()
+            font.setPointSize(10)  # можно настроить
+            painter.setFont(font)
+            # Отступы слева, как в стандартном стиле
+            text_rect = QRect(rect.left() + 10, rect.top(), rect.width() - 20, rect.height())
+            painter.drawText(text_rect, Qt.AlignLeft | Qt.AlignVCenter, text)
+        
+        painter.restore()
+    
+    def sizeHint(self, option, index):
+        return QSize(0, 30)
+
+class FixedComboBox(QComboBox):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._setup_view()
+    
+    def _setup_view(self):
+        view = QListView()
+        view.setFrameShape(QFrame.NoFrame)
+        view.setSpacing(0)
+        view.setContentsMargins(0, 0, 0, 0)
+        view.setViewportMargins(0, 0, 0, 0)
+        view.setAttribute(Qt.WA_MacShowFocusRect, False)
+        view.setFocusPolicy(Qt.NoFocus)  # чтобы сам view не получал фокус
+        
+        # Устанавливаем делегат, который перерисовывает всё
+        delegate = NoFocusDelegate(view)
+        view.setItemDelegate(delegate)
+        
+        # Стиль для view задаёт только фон самого списка (если делегат не перекроет)
+        view.setStyleSheet("""
+            QListView {
+                background-color: #1e1e1e;
+                border: none;
+                padding: 0px;
+                margin: 0px;
+            }
+        """)
+        self.setView(view)
+    
+    def showPopup(self):
+        super().showPopup()
+        popup = self.view().parentWidget()
+        if popup:
+            popup.setContentsMargins(0, 0, 0, 0)
+            popup.setStyleSheet("background: #1e1e1e; border: none; outline: none;")

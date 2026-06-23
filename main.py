@@ -52,9 +52,10 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
-    QMenu,
+    QMenu, 
+    QListView,
 )
-from modules.other import GradientImageLabel,extract_youtube_video_id,parse_youtube_link,run_external_ytdlp,build_ytdlp_browser_args
+from modules.other import GradientImageLabel,extract_youtube_video_id,parse_youtube_link,run_external_ytdlp,build_ytdlp_browser_args,FixedComboBox,get_ffmpeg_executable
 from modules.discordrpcWrapper import discordrpcWrapper
 from modules.types import *
 from modules.dbus import MprisServer
@@ -109,8 +110,6 @@ def is_video_unavailable_error(error: str) -> bool:
 class ResolveSignals(QObject):
     resolved = Signal(int, object)
     failed = Signal(int, str, str)
-
-
 
 class JamPlaylistSignals(QObject):
     parsed = Signal(int, object, str)
@@ -695,7 +694,8 @@ class WaveformTask(QRunnable):
         return max(peak, rms * 1.08)
 
     def generate_waveform(self) -> list[float]:
-        ffmpeg = shutil.which("ffmpeg")
+        ffmpeg = get_ffmpeg_executable()
+
         if not ffmpeg:
             raise RuntimeError("ffmpeg not found in PATH")
 
@@ -929,17 +929,13 @@ class PlayerWindow(QMainWindow):
         self.album_label = QLabel("Unknown album")
         self.album_label.setObjectName("metaText")
 
-        #self.duration_label = QLabel("0:00")
-        #self.duration_label.setObjectName("durationText")
-        #self.duration_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-
         self.url_input = QLineEdit()
         self.url_input.setPlaceholderText("URL for yt-dlp")
         self.add_button = QPushButton("Add")
         self.add_button.clicked.connect(self.add_url)
         self.url_input.returnPressed.connect(self.add_url)
 
-        self.cookie_browser = QComboBox()
+        self.cookie_browser = FixedComboBox(self)
         self.cookie_browser.addItem("No cookies", "")
         self.cookie_browser.addItem("Firefox cookies", "firefox")
         self.cookie_browser.addItem("Chrome cookies", "chrome")
@@ -993,6 +989,7 @@ class PlayerWindow(QMainWindow):
         self.position_slider.sliderMoved.connect(self.on_seek_preview)
 
         self.time_label = QLabel("0:00 / 0:00")
+        self.time_label.setObjectName("durationText")
         self.status_label = QLabel("Ready")
         self.status_label.setObjectName("statusText")
 
@@ -2204,10 +2201,7 @@ class PlayerWindow(QMainWindow):
                 margin-left:10px;
             }
             #durationText {
-                color: #d6d6d6;
-                font-size: 24px;
-                font-weight: 700;
-                min-width: 82px;
+                color: #fff;
             }
             #statusText {
                 color: #8f8f8f;
@@ -2233,6 +2227,26 @@ class PlayerWindow(QMainWindow):
                 padding: 5px 8px;
                 min-height: 22px;
             }
+
+            QListView {
+                background-color: #191919;
+                border: none;
+                padding: 0px;
+                margin: 0px;
+            }
+            QListView::item {
+                background-color: #191919;
+                color: white;
+                padding: 8px 10px;
+                border: none;
+            }
+        QComboBox::drop-down {
+            border: none;
+        }
+        QComboBox QAbstractItemView {
+            outline: none;
+        }
+
             QPushButton:hover, QComboBox:hover {
                 background: #191919;
                 border-color: #3a3a3a;
@@ -2345,7 +2359,11 @@ def main() -> int:
     args, unknown = parser.parse_known_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(message)s") #,filename="app.log",filemode="w",force=True 
+
     app = QApplication(sys.argv)
+    if (sys.platform == "win32"):
+        app.setStyle("Fusion")
+
     global ERROR_REPORTER
     ERROR_REPORTER = ErrorReporter()
     install_exception_hooks()
