@@ -15,15 +15,16 @@ import json
 
 
 class GradientImageLabel(QLabel):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None,gradient=[],blur_effect=0):
         super().__init__(parent)
         self.original_pixmap = QPixmap()
         # ОТКЛЮЧАЕМ стандартное искажающее растягивание Qt
         self.setScaledContents(False) 
 
         self.blur_effect = QGraphicsBlurEffect()
-        self.blur_effect.setBlurRadius(16)
+        self.blur_effect.setBlurRadius(blur_effect)
         self.setGraphicsEffect(self.blur_effect)
+        self.gradient=gradient
         
     def set_new_image(self, image_source):
         """Динамически принимает путь к файлу (str) или готовый QPixmap"""
@@ -85,8 +86,8 @@ class GradientImageLabel(QLabel):
         
         # Линейный градиент сверху вниз по размеру виджета
         gradient = QLinearGradient(0, 0, 0, target_height)
-        gradient.setColorAt(0.95, QColor(0, 0, 0, 0))    # Прозрачный верх
-        gradient.setColorAt(0.6, QColor(0, 0, 0, 128))  # Непрозрачный низ
+        for x in self.gradient:
+            gradient.setColorAt(x[0], x[1]) 
         
         painter.fillRect(result_image.rect(), gradient)
         painter.end()

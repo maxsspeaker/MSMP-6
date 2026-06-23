@@ -908,12 +908,13 @@ class PlayerWindow(QMainWindow):
         self.NowDisplay.setObjectName("NowDisplay")
         self.NowDisplay.setFixedHeight(210)
 
-        self.cover_label = QLabel()
+        self.cover_label = GradientImageLabel(self.NowDisplay)
         self.cover_label.setFixedSize(128, 128)
         self.cover_label.setAlignment(Qt.AlignCenter)
         self.cover_label.setObjectName("cover")
+        #self.cover_label.setScaledContents(True)
 
-        self.cover_background = GradientImageLabel(self.NowDisplay)
+        self.cover_background = GradientImageLabel(self.NowDisplay,[(0.95, QColor(0, 0, 0, 0)),(0.6, QColor(0, 0, 0, 128))],blur_effect=16)
         self.cover_background.setAlignment(Qt.AlignCenter)
         self.cover_background.setScaledContents(True)
         self.cover_background.setFixedHeight(210)
@@ -1698,10 +1699,8 @@ class PlayerWindow(QMainWindow):
             self.set_cover_placeholder()
 
     def set_cover_placeholder(self) -> None:
-        pixmap = QPixmap(self.cover_label.size())
-        pixmap.fill(Qt.black)
         self.cover_background.set_new_image(QPixmap("resources/MSMPwaveBg.png"))
-        self.cover_label.setPixmap(pixmap)
+        self.cover_label.set_new_image(QPixmap("resources/MSMPwave.png"))
 
     def on_artwork_loaded(self, reply) -> None:
         data = reply.readAll()
@@ -1712,7 +1711,7 @@ class PlayerWindow(QMainWindow):
                 Qt.KeepAspectRatioByExpanding,
                 Qt.SmoothTransformation,
             )
-            self.cover_label.setPixmap(scaled)
+            self.cover_label.set_new_image(scaled)
             self.cover_background.set_new_image(scaled)
         else:
             self.set_cover_placeholder()
