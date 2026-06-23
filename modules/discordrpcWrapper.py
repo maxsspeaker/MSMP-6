@@ -10,6 +10,7 @@ class discordrpcWrapper:
             print("connecting to discordrpc")
             self.rpc = discordrpc.RPC(app_id=811577404279619634)
         except Exception:
+            traceback.print_exc()
             self.rpc = None
 
         self.MainWindow=MainWindow
@@ -19,7 +20,8 @@ class discordrpcWrapper:
         self.position=0
 
         try:
-            self.rpc.set_activity(
+            if(self.rpc):
+                self.rpc.set_activity(
                         state=None,
                         details=None,
                         act_type=discordrpc.Activity.Listening,
@@ -29,7 +31,6 @@ class discordrpcWrapper:
                         large_text=None
                         )
         except:
-            print(traceback.format_stack())
             self.rpc = None
 
 
@@ -63,7 +64,7 @@ class discordrpcWrapper:
                     large_text=self.itemSelected.album or self.MainWindow.playlist_title or None
                     )
             except:
-                print(traceback.format_stack())
+                traceback.print_exc()
                 self.rpc = None
     def set_playback_status(self, status: str) -> None:
         if status not in {"Playing", "Paused", "Stopped"}:
@@ -106,7 +107,7 @@ class discordrpcWrapper:
                     large_text=self.itemSelected.album or self.MainWindow.playlist_title or None
                     )
             except:
-                print(traceback.format_stack())
+                traceback.print_exc()
                 self.rpc = None
     def sync_position(self, position_ms: int) -> None:
         self.position=int(position_ms/1000)
@@ -130,5 +131,5 @@ class discordrpcWrapper:
                     large_text=self.itemSelected.album or self.MainWindow.playlist_title or None
                     )
             except:
-                print(traceback.format_stack())
+                traceback.print_exc()
                 self.rpc = None

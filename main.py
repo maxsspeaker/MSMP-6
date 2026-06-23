@@ -17,8 +17,6 @@ import shutil
 import subprocess
 import tempfile
 
-import yt_dlp
-
 from dbus_next import Variant
 from PySide6.QtCore import (
     QObject,
@@ -56,7 +54,7 @@ from PySide6.QtWidgets import (
     QWidget,
     QMenu,
 )
-from modules.other import GradientImageLabel,extract_youtube_video_id,parse_youtube_link
+from modules.other import GradientImageLabel,extract_youtube_video_id,parse_youtube_link,run_external_ytdlp,build_ytdlp_browser_args
 from modules.discordrpcWrapper import discordrpcWrapper
 from modules.types import *
 from modules.dbus import MprisServer
@@ -139,7 +137,7 @@ class JamPlaylistTask(QRunnable):
     @Slot()
     def run(self) -> None:
         try:
-            if(self.JamPlaylist):
+            if self.JamPlaylist:
                 video_id = extract_youtube_video_id(self.page_url)
 
                 if not video_id:
@@ -148,29 +146,31 @@ class JamPlaylistTask(QRunnable):
                 jam_url = (
                     "https://www.youtube.com/watch?v="
                     f"{video_id}&list=RD{video_id}&start_radio=1"
-                    )
+                )
             else:
-                jam_url=self.page_url
+                jam_url = self.page_url
 
             print(jam_url)
-
             print("Resolving playlist")
 
-            options = {
-                "no_warnings": True,
-                "skip_download": True,
-                "extract_flat": True,
-                "noplaylist": False,
-                "nocheckcertificate": True,
-                "retries": 3,
-                "fragment_retries": 3,
-                "logger": YtdlpLogger(self.signals.status),
-            }
-            if self.cookie_browser:
-                options["cookiesfrombrowser"] = (self.cookie_browser,)
-
-            with yt_dlp.YoutubeDL(options) as ydl:
-                data = ydl.extract_info(jam_url, download=False)
+            args = [
+                "--no-quiet",
+                "--no-warnings",
+                "--skip-download",
+                "--flat-playlist",
+                "--dump-single-json",
+                "--no-check-certificates",
+                "--retries",
+                "3",
+                "--fragment-retries",
+                "3",
+                *build_ytdlp_browser_args(self.cookie_browser),
+                jam_url,
+            ]
+            try:
+                data = run_external_ytdlp(args, status=self.signals.status)
+            except: 
+                print(traceback.format_stack())
 
             if not isinstance(data, dict):
                 raise RuntimeError("yt-dlp returned an empty or invalid playlist response")
@@ -228,7 +228,7 @@ class JamPlaylistTask(QRunnable):
     @staticmethod
     def format_error(exc: BaseException) -> str:
         message = str(exc).strip()
-        if isinstance(exc, yt_dlp.utils.DownloadError):
+        if "ERROR:" in message:
             message = message.removeprefix("ERROR:").strip()
         if "HTTP Error 429" in message or "Too Many Requests" in message:
             return (
@@ -280,6 +280,7 @@ class YtdlpLogger:
         logging.info("yt-dlp: %s", message)
 
 
+
 class ResolveTask(QRunnable):
     def __init__(
         self,
@@ -297,27 +298,28 @@ class ResolveTask(QRunnable):
     @Slot()
     def run(self) -> None:
         try:
-            options = {
-                "format": "bestaudio/best",
-                "noplaylist": True,
-      #          "no_warnings": True,
-                "logger": YtdlpLogger(),
-                "skip_download": True,
-                "extract_flat": False,
-                'verbose': True,
-                "nocheckcertificate": True,
-                "retries": 3,
-                "fragment_retries": 3,
-                'js_runtimes': {'node': {'path': '/usr/bin/node'}},
-                'remote_components': ['ejs:github'],
-            }
-            if self.cookie_browser:
-                options["cookiesfrombrowser"] = (self.cookie_browser,)
-
             print("Resolving audio")
 
-            with yt_dlp.YoutubeDL(options) as ydl:
-                data = ydl.extract_info(self.url, download=False)
+            args = [
+                "--no-quiet",
+                "--no-warnings",
+                "--skip-download",
+                "--dump-single-json",
+                "--no-playlist",
+                "--format",
+                "bestaudio/best",
+                "--no-check-certificates",
+                "--retries",
+                "3",
+                "--fragment-retries",
+                "3",
+                *build_ytdlp_browser_args(self.cookie_browser),
+                self.url,
+            ]
+
+            data = run_external_ytdlp(args, status=None)
+
+
             if not isinstance(data, dict):
                 raise RuntimeError("yt-dlp returned an empty or invalid response")
 
@@ -347,7 +349,7 @@ class ResolveTask(QRunnable):
     @staticmethod
     def format_error(exc: BaseException) -> str:
         message = str(exc).strip()
-        if isinstance(exc, yt_dlp.utils.DownloadError):
+        if "ERROR:" in message:
             message = message.removeprefix("ERROR:").strip()
         if "HTTP Error 429" in message or "Too Many Requests" in message:
             return (
@@ -1300,7 +1302,7 @@ class PlayerWindow(QMainWindow):
         details: str = "",
     ) -> None:
         self.resolving_indexes.discard(index)
-        if(index):
+        if not(index==None):
             self.resolve_autoplay.pop(index, None)
             if 0 <= index < len(self.playlist):
                 item = self.playlist[index]
@@ -1314,7 +1316,7 @@ class PlayerWindow(QMainWindow):
             else:
                 title = "item"
 
-        message = f"yt-dlp failed for {title}: {error}"
+        message = f"yt-dlp failed: {error}"
         self.status_label.setText(message)
         console_details = details or message
         print(console_details, file=sys.stderr, flush=True)
@@ -1324,7 +1326,6 @@ class PlayerWindow(QMainWindow):
         box.setIcon(QMessageBox.Warning)
         box.setWindowTitle("yt-dlp error")
         box.setText(error)
-        box.setInformativeText(title)
         if details:
             box.setDetailedText(details)
         self.error_boxes.append(box)
@@ -1702,7 +1703,7 @@ class PlayerWindow(QMainWindow):
     def set_cover_placeholder(self) -> None:
         pixmap = QPixmap(self.cover_label.size())
         pixmap.fill(Qt.black)
-        self.cover_background.set_new_image(QPixmap("Logos/MSMPwaveHero.png"))
+        self.cover_background.set_new_image(QPixmap("resources/MSMPwaveBg.png"))
         self.cover_label.setPixmap(pixmap)
 
     def on_artwork_loaded(self, reply) -> None:

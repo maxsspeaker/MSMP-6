@@ -1,15 +1,17 @@
 import random,hashlib
-import psutil,os,sys
+import os,sys
 from PySide6.QtWidgets import (
     QApplication, QWidget, QPushButton, QVBoxLayout,
     QHBoxLayout, QGraphicsOpacityEffect, QLabel, QGraphicsBlurEffect
 )
 from PySide6.QtGui import QColor,QPixmap, QPainter, QLinearGradient, QImage
 from PySide6.QtCore import QPropertyAnimation, QRect, QEasingCurve, Qt,QObject, QProcess,QParallelAnimationGroup
-import requests
 import __main__ 
 import re
 from urllib.parse import parse_qs, urlparse
+import subprocess
+import shutil
+import json
 
 class GradientImageLabel(QLabel):
     def __init__(self, parent=None):
@@ -135,6 +137,31 @@ def parse_youtube_link(url):
             "type": "Неизвестная ссылка или не YouTube"
         }
 
+def get_ytdlp_executable() -> str:
+    candidates = [
+        os.environ.get("YTDLP_PATH", "").strip(),
+        os.environ.get("YTDLP_BIN", "").strip(),
+        shutil.which("yt-dlp") or "",
+        shutil.which("yt-dlp.exe") or "",
+    ]
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    candidates.extend(
+        [
+            os.path.join(script_dir, "yt-dlp"),
+            os.path.join(script_dir, "yt-dlp.exe"),
+        ]
+    )
+
+    for candidate in candidates:
+        if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+
+    raise RuntimeError(
+        "yt-dlp executable not found. Set YTDLP_PATH/YTDLP_BIN or put yt-dlp in PATH."
+    )
+
+
+
 def extract_youtube_video_id(page_url: str) -> str:
     parsed = urlparse(page_url)
     query_id = parse_qs(parsed.query).get("v", [None])[0]
@@ -157,3 +184,55 @@ def extract_youtube_video_id(page_url: str) -> str:
         if len(tail) >= 6:
             return tail.strip()
     return ""
+
+
+def run_external_ytdlp(
+    args: list[str],
+    status=None,
+) -> dict:
+    executable = get_ytdlp_executable()
+    cmd = [executable, *args]
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,   
+        stderr=subprocess.PIPE, # Сливаем потоки, чтобы читать всё из stdout
+        text=True,
+        encoding="utf-8"
+        )
+    json_data=None
+
+    while True:
+        line = proc.stdout.readline()
+            
+        if not line and proc.poll() is not None:
+            break
+            
+        if line:
+            if line.startswith('{'):
+                json_data = line.strip()
+            else:
+                if(status):
+                    status.emit(line.strip())
+                print(line, end='')
+
+    proc.wait()
+
+    if proc.returncode != 0:
+        message = proc.stderr.readline() or f"yt-dlp exited with code {proc.returncode}"
+        raise RuntimeError(message)
+
+    payload = json_data
+    if not payload:
+        raise RuntimeError("yt-dlp returned no data")
+
+    try:
+        return json.loads(json_data)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Failed to parse yt-dlp JSON output: {exc}") from exc
+
+
+def build_ytdlp_browser_args(cookie_browser: str) -> list[str]:
+    browser = (cookie_browser or "").strip()
+    if not browser:
+        return []
+    return ["--cookies-from-browser", browser]
