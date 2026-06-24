@@ -55,6 +55,7 @@ from PySide6.QtWidgets import (
     QWidget,
     QMenu, 
     QListView,
+    QSizePolicy,
 )
 from modules.other import GradientImageLabel,extract_youtube_video_id,parse_youtube_link,run_external_ytdlp,build_ytdlp_browser_args,FixedComboBox,get_ffmpeg_executable
 from modules.discordrpcWrapper import discordrpcWrapper
@@ -1120,13 +1121,27 @@ class PlayerWindow(QMainWindow):
         playlist_menu.addWidget(self.save_button)
         playlist_menu.addWidget(self.load_button)
 
+        self.playlistBox=QWidget(self)
+        self.playlistBox.setContentsMargins(0, 0, 0, 0)
+
+        playlistBox = QVBoxLayout()
+        playlistBox.addWidget(self.table, 1)
+        playlistBox.addLayout(playlist_menu)
+        playlistBox.setContentsMargins(0, 0, 0, 0)
+        self.playlistBox.setLayout(playlistBox)
+        self.playlistBox.setMinimumHeight(0)
+
+        size_policy = self.playlistBox.sizePolicy()
+        size_policy.setVerticalPolicy(QSizePolicy.Policy.Ignored)
+        self.playlistBox.setSizePolicy(size_policy)
+
+
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(self.NowDisplay)
         layout.addWidget(now_playing)
-        layout.addWidget(self.table, 1)
-        layout.addLayout(playlist_menu)
+        layout.addWidget(self.playlistBox)
         layout.addWidget(self.status_label)
 
         container = QWidget()
