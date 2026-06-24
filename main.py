@@ -32,6 +32,7 @@ from PySide6.QtCore import (
     qInstallMessageHandler,
     QPoint,
     QSize,
+    Property,
 )
 from PySide6.QtMultimedia import QAudioBufferOutput, QAudioFormat, QAudioOutput, QMediaPlayer
 from PySide6.QtGui import QBrush, QColor, QFont, QLinearGradient, QPainter, QPixmap,QAction,QIcon
@@ -61,6 +62,10 @@ from modules.other import GradientImageLabel,extract_youtube_video_id,parse_yout
 from modules.discordrpcWrapper import discordrpcWrapper
 from modules.types import *
 from modules.dbus import MprisServer
+from modules.ui_engine import UIEngine
+
+UIEngine.register("gradientImageLabel", GradientImageLabel)
+UIEngine.register("fixedComboBox",      FixedComboBox)
 
 
 ERROR_REPORTER: Optional["ErrorReporter"] = None
@@ -396,7 +401,7 @@ class ResolveTask(QRunnable):
 
 
 class VisualizerWindow(QWidget):
-    def __init__(self) -> None:
+    def __init__(self,parent=None) -> None:
         super().__init__()
         #self.setWindowTitle("MSMP5 Levels")
         #self.setAttribute(Qt.WA_DeleteOnClose)
@@ -404,6 +409,11 @@ class VisualizerWindow(QWidget):
         self.levels = [0.0] * VISUALIZER_BAR_COUNT
         self.peaks = [0.0] * VISUALIZER_BAR_COUNT
         self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.parent=parent
+        self._bar_color_low = QColor("#7CFF6B")
+        self._bar_color_mid = QColor("#D7FF4A")
+        self._bar_color_high = QColor("#FFB347")
+        self._bar_color_peak = QColor("#FF5D5D")
 
     def set_levels(self, levels: list[float], peaks: Optional[list[float]] = None) -> None:
         if not levels:
@@ -417,6 +427,42 @@ class VisualizerWindow(QWidget):
 
         self.levels = [min(1.0, max(0.0, level)) for level in levels]
         self.peaks = [min(1.0, max(0.0, peak)) for peak in peaks]
+        self.update()
+
+    @Property(QColor)
+    def barColorLow(self):
+        return self._bar_color_low
+
+    @barColorLow.setter
+    def barColorLow(self, color: QColor):
+        self._bar_color_low = color
+        self.update()  # Вызываем перерисовку при изменении стиля
+
+    @Property(QColor)
+    def barColorMid(self):
+        return self._bar_color_mid
+
+    @barColorMid.setter
+    def barColorMid(self, color: QColor):
+        self._bar_color_mid = color
+        self.update()
+
+    @Property(QColor)
+    def barColorHigh(self):
+        return self._bar_color_high
+
+    @barColorHigh.setter
+    def barColorHigh(self, color: QColor):
+        self._bar_color_high = color
+        self.update()
+
+    @Property(QColor)
+    def barColorPeak(self):
+        return self._bar_color_peak
+
+    @barColorPeak.setter
+    def barColorPeak(self, color: QColor):
+        self._bar_color_peak = color
         self.update()
 
     @staticmethod
@@ -435,14 +481,13 @@ class VisualizerWindow(QWidget):
             result.append(levels[left] * (1 - fraction) + levels[right] * fraction)
         return result
 
-    @staticmethod
-    def level_color(level: float) -> QColor:
+    def level_color(self,level: float) -> QColor:
         level = max(0.0, min(1.0, level))
         if level < 0.35:
-            return QColor(VISUALIZER_BAR_COLOR_LOW)
+            return self._bar_color_low
         if level < 0.7:
-            return QColor(VISUALIZER_BAR_COLOR_MID)
-        return QColor(VISUALIZER_BAR_COLOR_HIGH)
+            return self._bar_color_mid
+        return self._bar_color_high
 
     def paintEvent(self, _event) -> None:
         painter = QPainter(self)
@@ -495,8 +540,7 @@ class VisualizerWindow(QWidget):
 
             # Peak cap, the tiny bright ridge that makes it feel like CAVA.
             peak_y = base_y - max(VISUALIZER_MIN_BAR_HEIGHT, peak * drawable_height)
-            peak_color = QColor(VISUALIZER_BAR_COLOR_PEAK)
-            painter.setBrush(peak_color)
+            painter.setBrush(self._bar_color_peak)
             painter.drawRoundedRect(
                 x,
                 peak_y - (VISUALIZER_PEAK_HEIGHT * 0.5),
@@ -514,7 +558,7 @@ class WaveformSeekBar(QWidget):
     sliderReleased = Signal()
     valueChanged = Signal(int)
 
-    def __init__(self) -> None:
+    def __init__(self,parent=None) -> None:
         super().__init__()
         self._minimum = 0
         self._maximum = 1
@@ -526,6 +570,8 @@ class WaveformSeekBar(QWidget):
         self.setCursor(Qt.PointingHandCursor)
         self.setFixedHeight(WAVEFORM_HEIGHT)
         self.setObjectName("waveformSeekBar")
+        self.parent=parent
+
 
     def setRange(self, minimum: int, maximum: int) -> None:
         self._minimum = int(minimum)
@@ -796,6 +842,10 @@ class WaveformTask(QRunnable):
         return [min(1.0, max(0.0, (value / peak) ** 0.82)) for value in waveform]
 
 
+# Регистрируем кастомные виджеты после их объявления
+UIEngine.register("waveformSeekBar",  WaveformSeekBar)
+UIEngine.register("visualizerWindow", VisualizerWindow)
+
 
 class PlayerWindow(QMainWindow):
     MAX_RESTARTS = 3
@@ -842,6 +892,8 @@ class PlayerWindow(QMainWindow):
         self.resize(820, 760)
 
         self.setWindowIcon(QIcon("resources/MSMPicon.png"))
+
+        self.SkinName="Pleximania"
 
         self.playlist: list[PlaylistItem] = []
         self.current_index: Optional[int] = None
@@ -914,106 +966,108 @@ class PlayerWindow(QMainWindow):
         self.buffer_progress_timer.setInterval(120)
         self.buffer_progress_timer.timeout.connect(self.poll_buffer_progress)
 
-        self.NowDisplay = QWidget(self)
-        self.NowDisplay.setObjectName("NowDisplay")
-        self.NowDisplay.setFixedHeight(210)
+        # ── Построение UI через движок ─────────────────────────────────────
+        _ui_xml_path = os.path.join(os.path.dirname(__file__), f"skins/{self.SkinName}/index.xml")
 
-        self.cover_label = GradientImageLabel(self.NowDisplay)
-        self.cover_label.setFixedSize(128, 128)
-        self.cover_label.setAlignment(Qt.AlignCenter)
-        self.cover_label.setObjectName("cover")
-        #self.cover_label.setScaledContents(True)
+        self._engine = UIEngine(context=self, default_spacing=0, default_margin=0)
+        container = self._engine.build_file(_ui_xml_path)
 
-        self.cover_background = GradientImageLabel(self.NowDisplay,[(0.95, QColor(0, 0, 0, 0)),(0.6, QColor(0, 0, 0, 128))],blur_effect=16)
+        # Удобный алиас: self.ui["widget_id"]
+        self.ui = self._engine.widgets
+
+        # ── Ссылки на виджеты (совместимость с остальным кодом) ───────────
+        self.NowDisplay          = self.ui["NowDisplay"]
+        self.cover_background    = self.ui["cover_background"]
+        self.cover_label         = self.ui["cover_label"]
+        self.track_title_label   = self.ui["track_title_label"]
+        self.artist_label        = self.ui["artist_label"]
+        self.album_label         = self.ui["album_label"]
+        self.position_slider     = self.ui["position_slider"]
+        self.time_label          = self.ui["time_label"]
+        self.volume_slider       = self.ui["volume_slider"]
+        self.status_label        = self.ui["status_label"]
+        self.url_input           = self.ui["url_input"]
+        self.add_button          = self.ui["add_button"]
+        self.cookie_browser      = self.ui["cookie_browser"]
+        self.clear_button        = self.ui["clear_button"]
+        self.save_button         = self.ui["save_button"]
+        self.load_button         = self.ui["load_button"]
+        self.play_button         = self.ui["play_button"]
+        self.pause_button        = self.ui["pause_button"]
+        self.stop_button         = self.ui["stop_button"]
+        self.prev_button         = self.ui["prev_button"]
+        self.next_button         = self.ui["next_button"]
+        self.restart_button      = self.ui["restart_button"]
+        self.mode_button         = self.ui["mode_button"]
+        self.playlistBox         = self.ui["playlistBox"]
+        self.table               = self.ui["table"]
+
+        # ── cover_background: создаётся вручную (нестандартные аргументы) ─
+
+        self.cover_background.gradient = [(0.95, QColor(0, 0, 0, 0)), (0.6, QColor(0, 0, 0, 128))]
         self.cover_background.setAlignment(Qt.AlignCenter)
         self.cover_background.setScaledContents(True)
         self.cover_background.setFixedHeight(210)
+        self.cover_background.lower()
+        self.cover_background.setGeometry(self.NowDisplay.rect())
 
+        self.track_title_label.setText("No track")
+        self.artist_label.setText("Unknown artist")
+        self.album_label.setText("Unknown album")
+
+
+        # ── Донастройка cover_label ────────────────────────────────────────
+        self.cover_label.setAlignment(Qt.AlignCenter)
+        self.cover_label.setObjectName("cover")
         self.set_cover_placeholder()
 
-        self.track_title_label = QLabel("")
+        # ── Донастройка мета-меток ────────────────────────────────────────
         self.track_title_label.setObjectName("trackTitle")
         self.track_title_label.setWordWrap(True)
-        self.artist_label = QLabel("")
         self.artist_label.setObjectName("metaText")
-        self.album_label = QLabel("")
         self.album_label.setObjectName("metaText")
 
-        self.url_input = QLineEdit()
-        self.url_input.setPlaceholderText("URL for yt-dlp")
-        self.add_button = QPushButton("Add")
-        self.add_button.clicked.connect(self.add_url)
+        # ── Донастройка status_label ──────────────────────────────────────
+        self.status_label.setObjectName("statusText")
+
+        # ── Донастройка time_label ────────────────────────────────────────
+        self.time_label.setObjectName("durationText")
+
+        # ── Иконки кнопок управления ──────────────────────────────────────
+        for btn, icon_file in (
+            (self.prev_button,    "resources/previous.svg"),
+            (self.stop_button,    "resources/stop.svg"),
+            (self.play_button,    "resources/play.svg"),
+            (self.pause_button,   "resources/pause.svg"),
+            (self.next_button,    "resources/next.svg"),
+            (self.restart_button, "resources/reload-audio.svg"),
+        ):
+            btn.setIcon(QIcon(icon_file))
+
+        self.mode_button.setIcon(QIcon(self.PLAY_MODES_icons[self.play_mode_index]))
+
+        # ── Донастройка cookie_browser (userData для элементов) ───────────
+        cookie_data = ["", "firefox", "chrome", "chromium", "brave", "edge"]
+        for i, data in enumerate(cookie_data):
+            self.cookie_browser.setItemData(i, data)
+
+        # ── Дополнительный connect для url_input (returnPressed) ──────────
         self.url_input.returnPressed.connect(self.add_url)
 
-        self.cookie_browser = FixedComboBox(self)
-        self.cookie_browser.addItem("No cookies", "")
-        self.cookie_browser.addItem("Firefox cookies", "firefox")
-        self.cookie_browser.addItem("Chrome cookies", "chrome")
-        self.cookie_browser.addItem("Chromium cookies", "chromium")
-        self.cookie_browser.addItem("Brave cookies", "brave")
-        self.cookie_browser.addItem("Edge cookies", "edge")
+        # ── Донастройка volume_slider ─────────────────────────────────────
+        self.volume_slider.valueChanged.connect(
+            lambda value: self.audio_output.setVolume(value / 100)
+        )
 
-        self.play_button = QPushButton()
-        self.play_button.setIcon(QIcon("resources/play.svg"))
-        self.play_button.setIconSize(QSize(26, 26))
-
-        self.pause_button = QPushButton()
-        self.pause_button.setIcon(QIcon("resources/pause.svg"))
-        self.pause_button.setIconSize(QSize(26, 26))
-
-        self.stop_button = QPushButton()
-        self.stop_button.setIcon(QIcon("resources/stop.svg"))
-        self.stop_button.setIconSize(QSize(26, 26))
-
-        self.prev_button = QPushButton()
-        self.prev_button.setIcon(QIcon("resources/previous.svg"))
-        self.prev_button.setIconSize(QSize(26, 26))
-
-        self.next_button = QPushButton()
-        self.next_button.setIcon(QIcon("resources/next.svg"))
-        self.next_button.setIconSize(QSize(26, 26))
-
-        self.restart_button = QPushButton()
-        self.restart_button.setIcon(QIcon("resources/reload-audio.svg"))
-        self.restart_button.setIconSize(QSize(26, 26))
-
-        #self.visualizer_button = QPushButton("Levels")
-        self.mode_button = QPushButton()
-        self.mode_button.setIcon(QIcon(self.PLAY_MODES_icons[self.play_mode_index]))
-        self.mode_button.setIconSize(QSize(26, 26))
-
-        self.play_button.clicked.connect(self.play_selected_or_current)
-        self.pause_button.clicked.connect(self.pause_playback)
-        self.stop_button.clicked.connect(self.stop_playback)
-        self.prev_button.clicked.connect(self.play_previous)
-        self.next_button.clicked.connect(self.play_next)
-        self.restart_button.clicked.connect(self.restart_current_stream)
-        #self.visualizer_button.clicked.connect(self.show_visualizer)
-        self.mode_button.clicked.connect(self.toggle_play_mode)
-
-        self.position_slider = WaveformSeekBar()
+        # ── Донастройка seek bar ──────────────────────────────────────────
         self.position_slider.setRange(0, 0)
         self.position_slider.set_buffered_ratio(0.0)
         self.position_slider.sliderPressed.connect(self.on_seek_start)
         self.position_slider.sliderReleased.connect(self.on_seek_end)
         self.position_slider.sliderMoved.connect(self.on_seek_preview)
 
-        self.time_label = QLabel("0:00 / 0:00")
-        self.time_label.setObjectName("durationText")
-        self.status_label = QLabel("Ready")
-        self.status_label.setObjectName("statusText")
-
-        self.volume_slider = QSlider(Qt.Horizontal)
-        self.volume_slider.setObjectName("volumeSlider")
-        self.volume_slider.setFixedWidth(120)
-        self.volume_slider.setRange(0, 100)
-        self.volume_slider.setValue(80)
-        self.volume_slider.valueChanged.connect(
-            lambda value: self.audio_output.setVolume(value / 100)
-        )
-        self.volume_slider.valueChanged.connect(self.on_volume_changed)
-
-        self.table = QTableWidget(0, 2)
+        # ── Донастройка таблицы ───────────────────────────────────────────
+        self.table.setColumnCount(2)
         self.table.setHorizontalHeaderLabels(["Track", "Length"])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
@@ -1023,134 +1077,26 @@ class PlayerWindow(QMainWindow):
         self.table.setAlternatingRowColors(False)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.table.cellDoubleClicked.connect(lambda row, _column: self.play_index(row))
+        self.table.cellDoubleClicked.connect(lambda row, _col: self.play_index(row))
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.show_playlist_menu)
 
-        self.remove_button = QPushButton("Remove")
-        self.clear_button = QPushButton("Clear")
-        self.up_button = QPushButton("Up")
-        self.down_button = QPushButton("Down")
-        self.save_button = QPushButton("Save")
-        self.load_button = QPushButton("Load")
-        self.clear_button.clicked.connect(self.clear_playlist)
-        self.up_button.clicked.connect(lambda: self.move_selected(-1))
-        self.down_button.clicked.connect(lambda: self.move_selected(1))
-        self.save_button.clicked.connect(self.save_playlist)
-        self.load_button.clicked.connect(self.load_playlist)
-
-        button_layout = QHBoxLayout()
-        button_layout.setSpacing(8)
-        button_layout.addStretch(1)
-        for button in (
-            self.prev_button,
-            self.stop_button,
-            self.play_button,
-            self.pause_button,
-            self.next_button,
-            self.restart_button,
-   #         self.visualizer_button,
-        ):
-            button_layout.addWidget(button)
-        button_layout.addStretch(3)
-        button_layout.addWidget(self.time_label)
-
-        button_layout.addWidget(self.mode_button)
-        button_layout.addWidget(self.volume_slider)
-
-        #seek_layout = QHBoxLayout()
-        #seek_layout.addWidget(self.position_slider, 1)
-        #seek_layout.addWidget(self.time_label)
-
-        #right_controls = QHBoxLayout()
-        #right_controls.addWidget(self.mode_button)
-        #right_controls.addWidget(self.volume_slider)
-
-        #top_right_layout = QVBoxLayout()
-        #top_right_layout.addWidget(self.duration_label)
-        #top_right_layout.addStretch(1)
-
-        meta_layout = QVBoxLayout()
-        meta_layout.addStretch(1)
-        meta_layout.addWidget(self.track_title_label)
-        meta_layout.addWidget(self.artist_label)
-        meta_layout.addWidget(self.album_label)
-        meta_layout.addStretch(1)
-
-        now_playing_layout = QVBoxLayout()
-        now_playing_layout.setContentsMargins(8, 8, 8, 8)
-
-        NowDisplayLayout=QVBoxLayout()
-
-        playNow_layout = QHBoxLayout()
-        playNow_layout.setContentsMargins(16, 16,16, 0)
-        playNow_layout.addWidget(self.cover_label)
-        playNow_layout.addLayout(meta_layout, 1)
-        playNow_layout.addWidget(self.visualizer_window)
-
-        NowDisplayLayout.addLayout(playNow_layout, 1)
-        NowDisplayLayout.addWidget(self.position_slider)
-        NowDisplayLayout.setContentsMargins(0, 0, 0, 0)
-
-
-        self.NowDisplay.setLayout(NowDisplayLayout)
-        self.cover_background.lower()
-        self.cover_background.setGeometry(self.NowDisplay.rect())
-
-        #now_playing_layout.addLayout(controls_layout)
-
-        control_layout = QVBoxLayout()
-
-        control_layout.addLayout(button_layout)
-        #control_layout.addLayout(seek_layout)
-
-        now_playing_layout.addLayout(control_layout)
-
-        now_playing = QFrame()
-        now_playing.setObjectName("nowPlaying")
-        now_playing.setLayout(now_playing_layout)
-
-        playlist_menu = QHBoxLayout()
-        playlist_menu.setSpacing(6)
-        playlist_menu.addWidget(self.add_button)
-        playlist_menu.addWidget(self.url_input, 1)
-        playlist_menu.addWidget(self.cookie_browser)
-       # playlist_menu.addWidget(self.up_button)
-      #  playlist_menu.addWidget(self.down_button)
-        playlist_menu.addWidget(self.clear_button)
-        playlist_menu.addWidget(self.save_button)
-        playlist_menu.addWidget(self.load_button)
-
-        self.playlistBox=QWidget(self)
-        self.playlistBox.setContentsMargins(0, 0, 0, 0)
-
-        playlistBox = QVBoxLayout()
-        playlistBox.addWidget(self.table, 1)
-        playlistBox.addLayout(playlist_menu)
-        playlistBox.setContentsMargins(0, 0, 0, 0)
-        self.playlistBox.setLayout(playlistBox)
+        # ── Политика размера playlistBox ──────────────────────────────────
         self.playlistBox.setMinimumHeight(0)
+        sp = self.playlistBox.sizePolicy()
+        sp.setVerticalPolicy(QSizePolicy.Policy.Ignored)
+        self.playlistBox.setSizePolicy(sp)
 
-        size_policy = self.playlistBox.sizePolicy()
-        size_policy.setVerticalPolicy(QSizePolicy.Policy.Ignored)
-        self.playlistBox.setSizePolicy(size_policy)
+        # ── visualizer_window уже создан движком, инициализируем данные ───
+        self.visualizer_window = self.ui["visualizer_window"]
+        self.visualizer_window.set_levels(self.visualizer_levels, self.visualizer_peaks)
+        self.visualizer_window.activateWindow()
 
-
-        layout = QVBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        layout.addWidget(self.NowDisplay)
-        layout.addWidget(now_playing)
-        layout.addWidget(self.playlistBox)
-        layout.addWidget(self.status_label)
-
-        container = QWidget()
-        container.setLayout(layout)
         self.setCentralWidget(container)
         self.apply_style()
         self.setup_mpris()
 
-        self.discordrpc=discordrpcWrapper(self)
+        self.discordrpc = discordrpcWrapper(self)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -2186,120 +2132,14 @@ class PlayerWindow(QMainWindow):
             "Volume": value / 100,
         })
 
+    def on_volume_slider_changed(self, value: int) -> None:
+        """Слот для volume_slider из XML (connect=). Делегирует в оба получателя."""
+        self.audio_output.setVolume(value / 100)
+        self.on_volume_changed(value)
+
     def apply_style(self) -> None:
-        self.setStyleSheet(
-            """
-            QMainWindow{
-                background: #191919;
-                color: #eeeeee;
-                font-family: "Noto Sans", "Segoe UI", sans-serif;
-                font-size: 13px;
-            }
-
-            #nowPlaying {
-                background: #171717;
-                border-bottom: 1px solid #232323;
-            }
-
-            #NowDisplay{
-                background: #000000;
-                border radius:16px;
-            }
-
-
-            #cover {
-                background: #101010;
-                border: 1px solid #202020;
-            }
-            #trackTitle {
-                color: #f5f5f5;
-                font-size: 19px;
-                font-weight: 700;
-                margin: 2px;
-                margin-left:10px;
-            }
-            #metaText {
-                color: #a8a8a8;
-                font-size: 14px;
-                margin: 2px;
-                margin-left:10px;
-            }
-            #durationText {
-                color: #fff;
-            }
-            #statusText {
-                color: #8f8f8f;
-                padding: 5px 10px;
-                border-top: 1px solid #161616;
-            }
-            QTableWidget {
-                background: #000000;
-                color: #f2f2f2;
-                selection-background-color: #151515;
-                selection-color: #ffffff;
-                border: 0;
-                outline: 0;
-            }
-            QTableWidget::item {
-                padding: 3px 6px;
-                border: 0;
-            }
-            QPushButton, QComboBox {
-                background: #0d0d0d;
-                color: #d7d7d7;
-                border: 1px solid #242424;
-                padding: 5px 8px;
-                min-height: 22px;
-            }
-
-            QListView {
-                background-color: #191919;
-                border: none;
-                padding: 0px;
-                margin: 0px;
-            }
-            QListView::item {
-                background-color: #191919;
-                color: white;
-                padding: 8px 10px;
-                border: none;
-            }
-        QComboBox::drop-down {
-            border: none;
-        }
-        QComboBox QAbstractItemView {
-            outline: none;
-        }
-
-            QPushButton:hover, QComboBox:hover {
-                background: #191919;
-                border-color: #3a3a3a;
-            }
-            QLineEdit {
-                background: #070707;
-                color: #eeeeee;
-                border: 1px solid #242424;
-                padding: 5px 8px;
-            }
-            QSlider::groove:horizontal {
-                background: #000000;
-                height: 3px;
-            }
-            QSlider::handle:horizontal {
-                background: #d8d8d8;
-                width: 10px;
-                margin: -5px 0;
-            }
-            QSlider::sub-page:horizontal {
-                background: #bdbdbd;
-            }
-            #waveformSeekBar {
-                background: #0b0b0b;
-                border: 1px solid #222222;
-                border-radius: 10px;
-            }
-            """
-        )
+        with open(os.path.join(os.path.dirname(__file__), f"skins/{self.SkinName}/style.css")) as f:
+            self.setStyleSheet(f.read())
 
     def closeEvent(self, event) -> None:
         self.mpris_server.stop()

@@ -15,7 +15,7 @@ import json
 
 
 class GradientImageLabel(QLabel):
-    def __init__(self, parent=None,gradient=[],blur_effect=0):
+    def __init__(self, parent=None,gradient:list = [],blur_effect:int = 0):
         super().__init__(parent)
         self.original_pixmap = QPixmap()
         # ОТКЛЮЧАЕМ стандартное искажающее растягивание Qt
@@ -355,3 +355,26 @@ class FixedComboBox(QComboBox):
         if popup:
             popup.setContentsMargins(0, 0, 0, 0)
             popup.setStyleSheet("background: #1e1e1e; border: none; outline: none;")
+
+
+def LocalSaveDir():
+    if (sys.platform == "linux"):
+        return os.path.join("~/.config","MSMP-Stream","6.0")
+    elif (sys.platform == "win32"):
+        if "__compiled__" in globals(): # I'm too lazy to support Windows for now.
+            return os.path.dirname(os.path.abspath(sys.argv[0]))
+        else:
+            return os.path.dirname(os.path.abspath(sys.modules['__main__'].__file__))
+
+
+
+def LoadConfigYaml():
+    with open("config.yaml", "r", encoding="utf-8") as f:
+        try:
+            data = yaml.safe_load(f)
+            print(data)
+        
+        except yaml.YAMLError as exc:
+            print(f"Ошибка чтения файла: {exc}") 
+
+#....

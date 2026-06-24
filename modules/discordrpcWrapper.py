@@ -8,7 +8,7 @@ class discordrpcWrapper:
     def __init__(self,MainWindow):
         try:
             print("connecting to discordrpc")
-            self.rpc = discordrpc.RPC(app_id=811577404279619634)
+            self.rpc = None#discordrpc.RPC(app_id=811577404279619634)
         except Exception:
             traceback.print_exc()
             self.rpc = None
