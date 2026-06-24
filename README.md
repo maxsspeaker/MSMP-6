@@ -51,6 +51,12 @@ cookies напрямую в библиотеку `yt-dlp`.
 | :---:| :---: | :---: |
 | YouTube | ✅📁💿🎵📻🎚️ | Direct |
 | Soundcloud | 🎵 | Direct |
+| Spotify | 💤❌ | Mirror |
+| Deezer | ❓ | Direct |
+| YandexMusic | ❓🔒 | Direct |
+| VkMusic | ❓ | Direct |
+| Apple Music | ❌ | Mirror |
+| Classic MSMP ID-s | ❌ | ❌ |
 
 ### Features
 
@@ -60,3 +66,7 @@ cookies напрямую в библиотеку `yt-dlp`.
 - 🎵 tracks
 - 📻 recommendations
 - 🎚️ fast-forwarding and rewinding tracks
+- ❓ Not tested
+- 🔒 Audio source requires premium account
+- 💤 Planned for the future
+- ❌ Removed/Not supported/Outdated
