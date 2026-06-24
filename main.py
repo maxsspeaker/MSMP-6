@@ -8,6 +8,7 @@ import threading
 import traceback
 import time
 import os
+import webbrowser
 from dataclasses import dataclass, field
 from typing import Optional
 from urllib.parse import parse_qs, urlparse
@@ -705,6 +706,8 @@ class WaveformTask(QRunnable):
         if self.duration_ms <= 0:
             raise RuntimeError("track duration is unknown")
 
+        CREATE_NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0) if sys.platform == "win32" else 0
+
         sample_rate = 22050
         chunk_samples = 2048
 
@@ -732,7 +735,7 @@ class WaveformTask(QRunnable):
             "pipe:1",
         ]
 
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,creationflags=CREATE_NO_WINDOW)
         assert proc.stdout is not None
         assert proc.stderr is not None
 
@@ -814,7 +817,7 @@ class PlayerWindow(QMainWindow):
         menu.addAction(action2)
 
         action3 = QAction("Открыть расположение", self)
-        action3.triggered.connect(lambda: os.system("xdg-open "+self.playlist[index.row()].page_url))
+        action3.triggered.connect(lambda: webbrowser.open(self.playlist[index.row()].page_url))
         menu.addAction(action3)
 
         menu.addSeparator() # Разделитель (опционально)
@@ -921,13 +924,12 @@ class PlayerWindow(QMainWindow):
 
         self.set_cover_placeholder()
 
-
-        self.track_title_label = QLabel("No track")
+        self.track_title_label = QLabel("")
         self.track_title_label.setObjectName("trackTitle")
         self.track_title_label.setWordWrap(True)
-        self.artist_label = QLabel("Unknown artist")
+        self.artist_label = QLabel("")
         self.artist_label.setObjectName("metaText")
-        self.album_label = QLabel("Unknown album")
+        self.album_label = QLabel("")
         self.album_label.setObjectName("metaText")
 
         self.url_input = QLineEdit()

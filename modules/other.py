@@ -233,12 +233,13 @@ def run_external_ytdlp(
 ) -> dict:
     executable = get_ytdlp_executable()
     cmd = [executable, *args]
+    CREATE_NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0) if sys.platform == "win32" else 0
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,   
         stderr=subprocess.PIPE, # Сливаем потоки, чтобы читать всё из stdout
         text=True,
-        encoding="utf-8"
+        encoding="utf-8",creationflags=CREATE_NO_WINDOW
         )
     json_data=None
 
