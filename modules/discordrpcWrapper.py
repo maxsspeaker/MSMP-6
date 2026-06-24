@@ -58,7 +58,7 @@ class discordrpcWrapper:
                     act_type=discordrpc.Activity.Listening,
                     ts_start=ts_start,
                     ts_end=ts_end,
-                    large_image=self.itemSelected.artwork_url,
+                    large_image=self.itemSelected.artwork_url or "msmpwave",
                     small_image=self.Status.lower(),
                     small_text=self.Status,
                     large_text=self.itemSelected.album or self.MainWindow.playlist_title or None
@@ -101,7 +101,7 @@ class discordrpcWrapper:
                     act_type=discordrpc.Activity.Listening,
                     ts_start=ts_start,
                     ts_end=ts_end,
-                    large_image=self.itemSelected.artwork_url,
+                    large_image=self.itemSelected.artwork_url or "msmpwave",
                     small_image=self.Status.lower(),
                     small_text=self.Status,
                     large_text=self.itemSelected.album or self.MainWindow.playlist_title or None
@@ -125,7 +125,7 @@ class discordrpcWrapper:
                     act_type=discordrpc.Activity.Listening,
                     ts_start=ts_start,
                     ts_end=ts_end,
-                    large_image=self.itemSelected.artwork_url,
+                    large_image=self.itemSelected.artwork_url or "msmpwave",
                     small_image=self.Status.lower(),
                     small_text=self.Status,
                     large_text=self.itemSelected.album or self.MainWindow.playlist_title or None
