@@ -1,4 +1,5 @@
-# MSMP FoxWave
+![MSMP FoxWave](Logos/MSMPwaveLogo.png)
+
 
 PySide6-аудиоплеер, который получает аудиопотоки через `yt-dlp`.
 
@@ -42,3 +43,20 @@ cookies напрямую в библиотеку `yt-dlp`.
   ]
 }
 ```
+
+
+## Supported Sources:
+
+| Source | Features | Playback |
+| :---:| :---: | :---: |
+| YouTube | ✅📁💿🎵📻🎚️ | Direct |
+| Soundcloud | 🎵 | Direct |
+
+### Features
+
+- ✅ Verified and officially supported
+- 📁 playlists
+- 💿 albums
+- 🎵 tracks
+- 📻 recommendations
+- 🎚️ fast-forwarding and rewinding tracks
