@@ -1,4 +1,4 @@
-![MSMP FoxWave](Logos/MSMPwaveLogo.png)
+![MSMP FoxWave](Logos/MSMPiconWave2Global.png)
 
 
 PySide6-аудиоплеер, который получает аудиопотоки через `yt-dlp`.
