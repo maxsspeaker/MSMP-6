@@ -362,8 +362,6 @@ class ResolveTask(QRunnable):
 
     @staticmethod
     def best_stream_url(data: dict) -> str:
-        if data.get("url") and data.get("acodec") != "none":
-            return data["url"]
 
         formats = data.get("formats") or []
         audio_formats = [
@@ -373,6 +371,14 @@ class ResolveTask(QRunnable):
             and item.get("acodec") != "none"
             and item.get("vcodec") in (None, "none")
         ]
+        for x in audio_formats:
+            if (x.get("acodec")=="mp3" and x.get("protocol")=="http"):
+                return x["url"]
+
+        if data.get("url") and data.get("acodec") != "none":
+            return data["url"]
+
+
         if not audio_formats:
             audio_formats = [
                 item for item in formats if item.get("url") and item.get("acodec") != "none"
@@ -1148,6 +1154,8 @@ class PlayerWindow(QMainWindow):
         elif(parsed["type"]=="playlist"):
             self.parse_jam_playlist(url="https://www.youtube.com/playlist?list="+parsed["playlist_id"])
         elif(parsed["type"]=="video"):
+            self.add_url_value(url)
+        else:
             self.add_url_value(url)
 
         print(parsed)

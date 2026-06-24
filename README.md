@@ -50,7 +50,7 @@ cookies напрямую в библиотеку `yt-dlp`.
 | Source | Features | Playback |
 | :---:| :---: | :---: |
 | YouTube | ✅📁💿🎵📻🎚️ | Direct |
-| Soundcloud | 🎵 | Direct |
+| Soundcloud | 🎵🎚️ | Direct |
 | Spotify | 💤❌ | Mirror |
 | Deezer | ❓ | Direct |
 | YandexMusic | ❓🔒 | Direct |
