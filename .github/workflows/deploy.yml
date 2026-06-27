@@ -32,9 +32,10 @@ jobs:
       - name: Build with Nuitka
         uses: Nuitka/Nuitka-Action@main
         with:
-          script-name: src/main.py
+          script-name: main.py
           mode: standalone
           output-dir: dist
+          output-file: msmp-foxwave
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -99,10 +100,13 @@ jobs:
       - name: Build with Nuitka
         uses: Nuitka/Nuitka-Action@main
         with:
-          script-name: src/main.py
+          script-name: main.py
           mode: standalone
           output-dir: dist
+          output-file: msmp-foxwave
           windows-console-mode: disable
+          company-name: Maxsspeaker.space Studio
+          windows-icon-from-ico: resources/icon.ico
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
