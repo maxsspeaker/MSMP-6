@@ -1,0 +1,111 @@
+name: Build media player
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install nuitka
+
+      - name: Build with Nuitka
+        uses: Nuitka/Nuitka-Action@main
+        with:
+          script-name: src/main.py
+          mode: standalone
+          output-dir: dist
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-build
+          path: dist
+
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install Python deps
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install nuitka
+
+      - name: Prepare external tools
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          New-Item -ItemType Directory -Force -Path "external\yt-dlp" | Out-Null
+          New-Item -ItemType Directory -Force -Path "external\deno" | Out-Null
+          New-Item -ItemType Directory -Force -Path "external\ffmpeg" | Out-Null
+
+          # yt-dlp: download the latest Windows exe from the release assets
+          $ytRelease = Invoke-RestMethod "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest"
+          $ytAsset = $ytRelease.assets | Where-Object { $_.name -like "yt-dlp*.exe" } | Select-Object -First 1
+          if (-not $ytAsset) { throw "yt-dlp Windows asset not found" }
+          Invoke-WebRequest $ytAsset.browser_download_url -OutFile "external\yt-dlp\yt-dlp.exe"
+
+          # Deno: official Windows release zip
+          $denoRelease = Invoke-RestMethod "https://api.github.com/repos/denoland/deno/releases/latest"
+          $denoAsset = $denoRelease.assets | Where-Object { $_.name -eq "deno-x86_64-pc-windows-msvc.zip" } | Select-Object -First 1
+          if (-not $denoAsset) { throw "Deno Windows asset not found" }
+          Invoke-WebRequest $denoAsset.browser_download_url -OutFile "$env:TEMP\deno.zip"
+          Expand-Archive "$env:TEMP\deno.zip" -DestinationPath "$env:TEMP\deno_unpack" -Force
+          Copy-Item "$env:TEMP\deno_unpack\deno.exe" "external\deno\deno.exe" -Force
+
+          # FFmpeg: ready-made Windows build
+          $ffRelease = Invoke-RestMethod "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest"
+          $ffAsset = $ffRelease.assets | Where-Object { $_.name -eq "ffmpeg-master-latest-win64-gpl-shared.zip" } | Select-Object -First 1
+          if (-not $ffAsset) { throw "FFmpeg Windows asset not found" }
+          Invoke-WebRequest $ffAsset.browser_download_url -OutFile "$env:TEMP\ffmpeg.zip"
+          Expand-Archive "$env:TEMP\ffmpeg.zip" -DestinationPath "$env:TEMP\ffmpeg_unpack" -Force
+
+          $ffRoot = Get-ChildItem "$env:TEMP\ffmpeg_unpack" -Directory | Select-Object -First 1
+          Copy-Item "$ffRoot\bin\*" "external\ffmpeg\" -Force
+
+      - name: Build with Nuitka
+        uses: Nuitka/Nuitka-Action@main
+        with:
+          script-name: src/main.py
+          mode: standalone
+          output-dir: dist
+          windows-console-mode: disable
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: dist
