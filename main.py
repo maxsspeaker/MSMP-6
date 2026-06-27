@@ -18,6 +18,9 @@ import shutil
 import subprocess
 import tempfile
 
+if (sys.platform == "linux"):
+    os.environ["QT_AUDIO_BACKEND"] = "PulseAudio" # <--- место для конфига
+
 from dbus_next import Variant
 from PySide6.QtCore import (
     QObject,
