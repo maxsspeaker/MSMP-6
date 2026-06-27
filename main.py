@@ -18,6 +18,8 @@ import shutil
 import subprocess
 import tempfile
 
+os.environ["QT_AUDIO_BACKEND"] = "PulseAudio" # <--- место для конфига
+
 from dbus_next import Variant
 from PySide6.QtCore import (
     QObject,
@@ -58,11 +60,12 @@ from PySide6.QtWidgets import (
     QListView,
     QSizePolicy,
 )
-from modules.other import GradientImageLabel,extract_youtube_video_id,parse_youtube_link,run_external_ytdlp,build_ytdlp_browser_args,FixedComboBox,get_ffmpeg_executable
+from modules.other import GradientImageLabel,FixedComboBox,get_ffmpeg_executable
 from modules.discordrpcWrapper import discordrpcWrapper
 from modules.types import *
 from modules.dbus import MprisServer
 from modules.ui_engine import UIEngine
+from modules import extractors
 
 UIEngine.register("gradientImageLabel", GradientImageLabel)
 UIEngine.register("fixedComboBox",      FixedComboBox)
@@ -114,137 +117,6 @@ def is_video_unavailable_error(error: str) -> bool:
     )
 
 
-class ResolveSignals(QObject):
-    resolved = Signal(int, object)
-    failed = Signal(int, str, str)
-
-class JamPlaylistSignals(QObject):
-    parsed = Signal(int, object, str)
-    status = Signal(str)
-    failed = Signal(int, str, str)
-
-
-class JamPlaylistTask(QRunnable):
-    def __init__(
-        self,
-        index: Optional[int],
-        page_url: str,
-        signals: JamPlaylistSignals,
-        cookie_browser: str = "",
-        JamPlaylist: bool = True,
-    ) -> None:
-        super().__init__()
-        self.index = index
-        self.page_url = page_url
-        self.cookie_browser = cookie_browser
-        self.signals = signals
-        self.JamPlaylist = JamPlaylist
-
-    @Slot()
-    def run(self) -> None:
-        try:
-            if self.JamPlaylist:
-                video_id = extract_youtube_video_id(self.page_url)
-
-                if not video_id:
-                    raise RuntimeError("Не удалось извлечь id видео из page_url")
-
-                jam_url = (
-                    "https://www.youtube.com/watch?v="
-                    f"{video_id}&list=RD{video_id}&start_radio=1"
-                )
-            else:
-                jam_url = self.page_url
-
-            print(jam_url)
-            print("Resolving playlist")
-
-            args = [
-                "--no-quiet",
-                "--no-warnings",
-                "--skip-download",
-                "--flat-playlist",
-                "--dump-single-json",
-                "--no-check-certificates",
-                "--retries",
-                "3",
-                "--fragment-retries",
-                "3",
-                *build_ytdlp_browser_args(self.cookie_browser),
-                jam_url,
-            ]
-            try:
-                data = run_external_ytdlp(args, status=self.signals.status)
-            except: 
-                print(traceback.format_stack())
-
-            if not isinstance(data, dict):
-                raise RuntimeError("yt-dlp returned an empty or invalid playlist response")
-
-            items: list[PlaylistItem] = []
-            entries = data.get("entries") or []
-            for entry in entries:
-                if not isinstance(entry, dict):
-                    continue
-
-                page_url = (
-                    entry.get("webpage_url")
-                    or entry.get("url")
-                    or entry.get("original_url")
-                    or ""
-                )
-
-                if not page_url:
-                    entry_id = str(entry.get("id") or "").strip()
-                    if entry_id:
-                        page_url = f"https://www.youtube.com/watch?v={entry_id}"
-
-                if not page_url:
-                    continue
-
-                items.append(
-                    PlaylistItem(
-                        page_url=str(page_url),
-                        title=str(entry.get("title") or entry.get("name") or page_url),
-                        duration=int(entry.get("duration") or 0),
-                        source_id=str(
-                            entry.get("extractor_key")
-                            or entry.get("extractor")
-                            or "yt-dlp"
-                        ),
-                        uploader=str(entry.get("uploader") or entry.get("channel") or ""),
-                        album=str(entry.get("album") or ""),
-                        artwork_url=str(entry.get("thumbnail") or ""),
-                    )
-                )
-
-            if not items:
-                raise RuntimeError("yt-dlp did not return any playlist items")
-
-            playlist_title = str(data.get("title") or "Jam playlist")
-            self.signals.parsed.emit(self.index, items, playlist_title)
-        except BaseException as exc:
-            error = self.format_error(exc)
-            details = traceback.format_exc()
-            try:
-                self.signals.failed.emit(self.index, error, details)
-            except RuntimeError:
-                print(details, file=sys.stderr, flush=True)
-
-    @staticmethod
-    def format_error(exc: BaseException) -> str:
-        message = str(exc).strip()
-        if "ERROR:" in message:
-            message = message.removeprefix("ERROR:").strip()
-        if "HTTP Error 429" in message or "Too Many Requests" in message:
-            return (
-                "HTTP 429 Too Many Requests. Сервис временно ограничил запросы. "
-                "Попробуйте позже или выберите cookies браузера с активной сессией."
-            )
-        if not message:
-            message = exc.__class__.__name__
-        return message
-
 
 class ErrorReporter(QObject):
     error_requested = Signal(str, str)
@@ -261,143 +133,6 @@ class ErrorReporter(QObject):
         box.setText(title)
         box.setDetailedText(details)
         box.exec()
-
-
-class YtdlpLogger:
-    def __init__(self,status=None):
-        self.status=status
-
-    def debug(self, message: str) -> None:
-        if(self.status):
-            self.status.emit(message)
-        print("yt-dlp: %s", message)
-        logging.debug("yt-dlp: %s", message)
-
-    def warning(self, message: str) -> None:
-        print("yt-dlp: %s", message)
-        logging.warning("yt-dlp: %s", message)
-
-    def error(self, message: str) -> None:
-        print("yt-dlp: %s", message)
-        logging.error("yt-dlp: %s", message)
-
-    def info(self, message: str) -> None:
-        print("yt-dlp: %s", message)
-        logging.info("yt-dlp: %s", message)
-
-
-
-class ResolveTask(QRunnable):
-    def __init__(
-        self,
-        index: int,
-        url: str,
-        signals: ResolveSignals,
-        cookie_browser: str = "",
-    ) -> None:
-        super().__init__()
-        self.index = index
-        self.url = url
-        self.cookie_browser = cookie_browser
-        self.signals = signals
-
-    @Slot()
-    def run(self) -> None:
-        try:
-            print("Resolving audio")
-
-            args = [
-                "--no-quiet",
-                "--no-warnings",
-                "--skip-download",
-                "--dump-single-json",
-                "--no-playlist",
-                "--format",
-                "bestaudio/best",
-                "--no-check-certificates",
-                "--retries",
-                "3",
-                "--fragment-retries",
-                "3",
-                *build_ytdlp_browser_args(self.cookie_browser),
-                self.url,
-            ]
-
-            data = run_external_ytdlp(args, status=None)
-
-
-            if not isinstance(data, dict):
-                raise RuntimeError("yt-dlp returned an empty or invalid response")
-
-            stream_url = self.best_stream_url(data)
-            if not stream_url:
-                raise RuntimeError("yt-dlp did not return a playable stream URL")
-
-            item = PlaylistItem(
-                page_url=self.url,
-                title=data.get("title") or self.url,
-                stream_url=stream_url,
-                duration=int(data.get("duration") or 0),
-                source_id=data.get("extractor_key") or data.get("extractor") or "yt-dlp",
-                uploader=data.get("uploader") or data.get("channel") or "",
-                album=data.get("album") or "",
-                artwork_url=data.get("thumbnail") or "",
-            )
-            self.signals.resolved.emit(self.index, item)
-        except BaseException as exc:
-            error = self.format_error(exc)
-            details = traceback.format_exc()
-            try:
-                self.signals.failed.emit(self.index, error, details)
-            except RuntimeError:
-                print(details, file=sys.stderr, flush=True)
-
-    @staticmethod
-    def format_error(exc: BaseException) -> str:
-        message = str(exc).strip()
-        if "ERROR:" in message:
-            message = message.removeprefix("ERROR:").strip()
-        if "HTTP Error 429" in message or "Too Many Requests" in message:
-            return (
-                "HTTP 429 Too Many Requests. Сервис временно ограничил запросы. "
-                "Попробуйте позже или выберите cookies браузера с активной сессией."
-            )
-        if not message:
-            message = exc.__class__.__name__
-        return message
-
-    @staticmethod
-    def best_stream_url(data: dict) -> str:
-
-        formats = data.get("formats") or []
-        audio_formats = [
-            item
-            for item in formats
-            if item.get("url")
-            and item.get("acodec") != "none"
-            and item.get("vcodec") in (None, "none")
-        ]
-        for x in audio_formats:
-            if (x.get("acodec")=="mp3" and x.get("protocol")=="http"):
-                return x["url"]
-
-        if data.get("url") and data.get("acodec") != "none":
-            return data["url"]
-
-
-        if not audio_formats:
-            audio_formats = [
-                item for item in formats if item.get("url") and item.get("acodec") != "none"
-            ]
-        if not audio_formats:
-            return ""
-
-        def score(item: dict) -> tuple[int, int]:
-            abr = int(item.get("abr") or item.get("tbr") or 0)
-            preference = int(item.get("preference") or 0)
-            return abr, preference
-
-        return max(audio_formats, key=score)["url"]
 
 
 class VisualizerWindow(QWidget):
@@ -893,7 +628,7 @@ class PlayerWindow(QMainWindow):
 
         self.setWindowIcon(QIcon("resources/MSMPicon.png"))
 
-        self.SkinName="Pleximania"
+        self.SkinName="Foxyglass"
 
         self.playlist: list[PlaylistItem] = []
         self.current_index: Optional[int] = None
@@ -931,10 +666,10 @@ class PlayerWindow(QMainWindow):
         self.waveform_generation_indexes: set[int] = set()
 
         self.thread_pool = QThreadPool.globalInstance()
-        self.resolve_signals = ResolveSignals()
+        self.resolve_signals = extractors.ResolveSignals()
         self.resolve_signals.resolved.connect(self.on_resolved)
         self.resolve_signals.failed.connect(self.on_resolve_failed)
-        self.jam_signals = JamPlaylistSignals()
+        self.jam_signals = extractors.JamPlaylistSignals()
         self.jam_signals.parsed.connect(self.on_jam_playlist_parsed)
         self.jam_signals.status.connect(self.on_jam_playlist_status)
         self.jam_signals.failed.connect(self.on_jam_playlist_failed)
@@ -1107,7 +842,7 @@ class PlayerWindow(QMainWindow):
         if not url:
             return
 
-        parsed=parse_youtube_link(url)
+        parsed=extractors.parse_youtube_link(url)
 
         if(parsed["type"]=="video&playlist"):
             self.add_url_value(url)
@@ -1146,7 +881,7 @@ class PlayerWindow(QMainWindow):
 
         self.resolving_indexes.add(index)
         self.resolve_autoplay[index] = auto_play
-        task = ResolveTask(
+        task = extractors.ResolveTask(
             index,
             self.playlist[index].page_url,
             self.resolve_signals,
@@ -1169,7 +904,7 @@ class PlayerWindow(QMainWindow):
             self.status_label.setText("Parsing playlist...")  
             JamPlaylist=False
 
-        task = JamPlaylistTask(
+        task = extractors.JamPlaylistTask(
             index,
             url,
             self.jam_signals,
@@ -1322,10 +1057,14 @@ class PlayerWindow(QMainWindow):
 
         item = self.playlist[row]
         is_current = row == self.current_index
-        background = QBrush(QColor("#1e2a33" if is_current else "#000000"))
-        foreground = QBrush(QColor("#5f6368" if item.unavailable else "#f2f2f2"))
-        if item.unavailable:
+        if is_current:
+            background = QBrush(QColor("#1e2a33"))
+        elif item.unavailable:
             background = QBrush(QColor("#0b0b0b"))
+        else:
+            background = QBrush() 
+
+        foreground = QBrush(QColor("#5f6368" if item.unavailable else "#f2f2f2"))
 
         for column in range(self.table.columnCount()):
             table_item = self.table.item(row, column)

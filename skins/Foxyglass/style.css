@@ -108,3 +108,10 @@ QSlider::sub-page:horizontal {
     border: 1px solid #222222;
     border-radius: 10px;
 }
+
+VisualizerWindow{
+        qproperty-barColorLow: #6d6d6d;
+        qproperty-barColorMid: #6d6d6d;
+        qproperty-barColorHigh: #6d6d6d;
+        qproperty-barColorPeak: #6d6d6d;
+}

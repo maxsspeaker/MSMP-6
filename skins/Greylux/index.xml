@@ -118,7 +118,6 @@
 
             <qlineedit id="url_input"
                        placeholder="URL for yt-dlp"
-                       connect="add_url"
                        stretch="1" />
 
             <fixedComboBox id="cookie_browser"

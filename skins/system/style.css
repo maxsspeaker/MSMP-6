@@ -1,0 +1,45 @@
+QMainWindow{
+    font-family: "Noto Sans", "Segoe UI", sans-serif;
+    font-size: 13px;
+}
+
+#nowPlaying {
+}
+
+#NowDisplay{
+    background: #000000;
+    border radius:16px;
+}
+
+
+#cover {
+    background: #101010;
+    border: 1px solid #202020;
+}
+#trackTitle {
+    color: #f5f5f5;
+    font-size: 19px;
+    font-weight: 700;
+    margin: 2px;
+    margin-left:10px;
+}
+#metaText {
+    font-size: 14px;
+    margin: 2px;
+    margin-left:10px;
+}
+#statusText {
+    padding: 5px 10px;
+}
+#waveformSeekBar {
+    background: #0b0b0b;
+    border: 1px solid #222222;
+    border-radius: 10px;
+}
+
+VisualizerWindow{
+        qproperty-barColorLow: #6d6d6d;
+        qproperty-barColorMid: #6d6d6d;
+        qproperty-barColorHigh: #6d6d6d;
+        qproperty-barColorPeak: #6d6d6d;
+}
