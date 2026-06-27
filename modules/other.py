@@ -8,14 +8,13 @@ from PySide6.QtGui import QColor,QPixmap, QPainter, QLinearGradient, QImage,QPal
 from PySide6.QtCore import QPropertyAnimation, QRect, QEasingCurve, Qt,QObject, QProcess,QParallelAnimationGroup,QSize
 import __main__ 
 import re
-from urllib.parse import parse_qs, urlparse
 import subprocess
 import shutil
 import json
 
 
 class GradientImageLabel(QLabel):
-    def __init__(self, parent=None,gradient=[],blur_effect=0):
+    def __init__(self, parent=None,gradient:list = [],blur_effect:int = 0):
         super().__init__(parent)
         self.original_pixmap = QPixmap()
         # ОТКЛЮЧАЕМ стандартное искажающее растягивание Qt
@@ -102,76 +101,6 @@ class GradientImageLabel(QLabel):
 
 
 
-def parse_youtube_link(url):
-    # Паттерн для чистого плейлиста (начинается с playlist?list=)
-    playlist_pattern = r'(?:https?:\/\/)?(?:www\.|m\.)?youtube\.com\/playlist\?(?:.*&)?list=([a-zA-Z0-9_-]+)'
-    
-    # Паттерн для видео (обычное, мобильное, короткое youtu.be или shorts)
-    video_pattern = r'(?:https?:\/\/)?(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})'
-    
-    # Паттерн для параметра list= в любой ссылке
-    list_param_pattern = r'[?&]list=([a-zA-Z0-9_-]+)'
-
-    # Проверяем, есть ли ID видео
-    video_match = re.search(video_pattern, url)
-    # Проверяем, есть ли ID плейлиста (как отдельный плейлист или параметр в видео)
-    playlist_match = re.search(playlist_pattern, url)
-    list_param_match = re.search(list_param_pattern, url)
-
-    if video_match and list_param_match:
-        return {
-            "type": "video&playlist",
-            "video_id": video_match.group(1),
-            "playlist_id": list_param_match.group(1)
-        }
-    elif playlist_match:
-        return {
-            "type": "playlist",
-            "playlist_id": playlist_match.group(1)
-        }
-    elif video_match:
-        return {
-            "type": "video",
-            "video_id": video_match.group(1)
-        }
-    else:
-        return {
-            "type": "Неизвестная ссылка или не YouTube"
-        }
-
-def get_ytdlp_executable() -> str:
-    if (sys.platform == "win32"):
-        if "__compiled__" in globals():
-            app_path = os.path.dirname(os.path.abspath(sys.argv[0]))
-        else:
-            app_path = os.path.dirname(os.path.abspath(sys.modules['__main__'].__file__))
-
-        print(os.path.join(app_path,"external","yt-dlp","yt-dlp.exe"))
-        return os.path.join(app_path,"external","yt-dlp","yt-dlp.exe")
-
-    candidates = [
-        os.environ.get("YTDLP_PATH", "").strip(),
-        os.environ.get("YTDLP_BIN", "").strip(),
-        shutil.which("yt-dlp") or "",
-        shutil.which("yt-dlp.exe") or "",
-    ]
-    script_dir = os.path.dirname(os.path.abspath(sys.modules['__main__'].__file__))
-    candidates.extend(
-        [
-            os.path.join(script_dir, "yt-dlp"),
-            os.path.join(script_dir, "yt-dlp.exe"),
-        ]
-    )
-
-    for candidate in candidates:
-        if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-            return candidate
-
-    raise RuntimeError(
-        "yt-dlp executable not found. Set YTDLP_PATH/YTDLP_BIN or put yt-dlp in PATH."
-    )
-
-
 
 def get_ffmpeg_executable() -> str:
     if (sys.platform == "win32"):
@@ -202,82 +131,6 @@ def get_ffmpeg_executable() -> str:
             return candidate
 
     return None
-
-def extract_youtube_video_id(page_url: str) -> str:
-    parsed = urlparse(page_url)
-    query_id = parse_qs(parsed.query).get("v", [None])[0]
-    if query_id:
-        return str(query_id).strip()
-
-    path = parsed.path.strip("/")
-    if parsed.netloc in {"youtu.be", "www.youtu.be"} and path:
-        return path.split("/", 1)[0].strip()
-
-    match = re.search(
-        r"(?:v=|/shorts/|/live/|/embed/|youtu\.be/)([A-Za-z0-9_-]{6,})",
-        page_url,
-    )
-    if match:
-        return match.group(1).strip()
-
-    if path:
-        tail = path.split("/")[-1]
-        if len(tail) >= 6:
-            return tail.strip()
-    return ""
-
-
-def run_external_ytdlp(
-    args: list[str],
-    status=None,
-) -> dict:
-    executable = get_ytdlp_executable()
-    cmd = [executable, *args]
-    CREATE_NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0) if sys.platform == "win32" else 0
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,   
-        stderr=subprocess.PIPE, # Сливаем потоки, чтобы читать всё из stdout
-        text=True,
-        encoding="utf-8",creationflags=CREATE_NO_WINDOW
-        )
-    json_data=None
-
-    while True:
-        line = proc.stdout.readline()
-            
-        if not line and proc.poll() is not None:
-            break
-            
-        if line:
-            if line.startswith('{'):
-                json_data = line.strip()
-            else:
-                if(status):
-                    status.emit(line.strip())
-                print(line, end='')
-
-    proc.wait()
-
-    if proc.returncode != 0:
-        message = proc.stderr.readline() or f"yt-dlp exited with code {proc.returncode}"
-        raise RuntimeError(message)
-
-    payload = json_data
-    if not payload:
-        raise RuntimeError("yt-dlp returned no data")
-
-    try:
-        return json.loads(json_data)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"Failed to parse yt-dlp JSON output: {exc}") from exc
-
-
-def build_ytdlp_browser_args(cookie_browser: str) -> list[str]:
-    browser = (cookie_browser or "").strip()
-    if not browser:
-        return []
-    return ["--cookies-from-browser", browser]
 
 
 class NoFocusDelegate(QStyledItemDelegate):
@@ -355,3 +208,26 @@ class FixedComboBox(QComboBox):
         if popup:
             popup.setContentsMargins(0, 0, 0, 0)
             popup.setStyleSheet("background: #1e1e1e; border: none; outline: none;")
+
+
+def LocalSaveDir():
+    if (sys.platform == "linux"):
+        return os.path.join("~/.config","MSMP-Stream","6.0")
+    elif (sys.platform == "win32"):
+        if "__compiled__" in globals(): # I'm too lazy to support Windows for now.
+            return os.path.dirname(os.path.abspath(sys.argv[0]))
+        else:
+            return os.path.dirname(os.path.abspath(sys.modules['__main__'].__file__))
+
+
+
+def LoadConfigYaml():
+    with open("config.yaml", "r", encoding="utf-8") as f:
+        try:
+            data = yaml.safe_load(f)
+            print(data)
+        
+        except yaml.YAMLError as exc:
+            print(f"Ошибка чтения файла: {exc}") 
+
+#....

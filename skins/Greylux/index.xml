@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    player_ui.xml — разметка интерфейса PlayerWindow
+
+    margin="л,т,п,н"  — setContentsMargins layout-а этого элемента
+    margin="8"         — все стороны одинаково
+    spacing="6"        — setSpacing layout-а этого элемента
+
+    Кастомные виджеты зарегистрированы в main.py:
+        gradientImageLabel  → GradientImageLabel
+        fixedComboBox       → FixedComboBox
+        waveformSeekBar     → WaveformSeekBar
+        visualizerWindow    → VisualizerWindow
+-->
+
+<!-- Корневой контейнер: VBox без отступов, нулевой spacing -->
+<qwidget flex="v" margin="0" spacing="0">
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         NowDisplay: обложка / мета / визуализатор / waveform-seekbar
+         ═══════════════════════════════════════════════════════════════ -->
+    <qwidget id="NowDisplay" fixed-height="210"
+             flex="v" margin="0" spacing="0">
+
+        <!-- Фоновое изображение — позиционируется вручную через resizeEvent -->
+        <gradientImageLabel id="cover_background"
+                            fixed-height="210"
+                            visible="false" blur_effect="16" nolayout="true"/>
+
+        <!-- Строка: обложка + мета + визуализатор
+             margin="16,16,16,0" → left=16 top=16 right=16 bottom=0  -->
+        <qwidget id="playNowRow" flex="h"
+                 margin="0,0,0,0" spacing="0"
+                 stretch="1">
+
+            <gradientImageLabel id="cover_label"
+                                fixed-width="168" fixed-height="168" blur_effect="0"/>
+
+            <!-- Мета-блок: заголовок + исполнитель + альбом, прижаты к центру -->
+            <qwidget id="metaBlock" flex="v"
+                     margin="0" spacing="0"
+                     stretch="1">
+
+
+                <qwidget id="infoPlayBlock" flex="h"
+                    margin="0,0,16,0" spacing="0"
+                    stretch="1">
+
+                    <qwidget id="metaAudioBlock" flex="v" margin="0" spacing="0" stretch="1">
+
+                        <qwidget stretch="1" />
+                        <qlabel id="track_title_label" style="color:#fff; font-size:19px; font-weight:700;margin:2px; margin-left:10px;" />
+                        <qlabel id="artist_label" style="color:#fff; font-size:14px; margin:2px; margin-left:10px;" />
+                        <qlabel id="album_label" style="color:#fff; font-size:14px; margin:2px; margin-left:10px;" />
+                        <qwidget stretch="1" />
+
+                    </qwidget>
+
+                    <visualizerWindow id="visualizer_window" fixed-width="233" fixed-height="128" />
+
+
+                </qwidget>
+
+                <qwidget id="buttonRow" flex="h" margin="6" spacing="8">
+
+                    <!-- левый распор -->
+
+                    <qpushbutton id="prev_button"    connect="play_previous" />
+                    <qpushbutton id="stop_button"    connect="stop_playback" />
+                    <qpushbutton id="play_button"    connect="play_selected_or_current" />
+                    <qpushbutton id="pause_button"   connect="pause_playback" />
+                    <qpushbutton id="next_button"    connect="play_next" />
+                    <qpushbutton id="restart_button" connect="restart_current_stream" />
+
+                    <!-- правый распор — в 3 раза шире левого, прижимает кнопки к центру -->
+                    <qwidget stretch="3" />
+
+                    <qlabel id="time_label" text="0:00 / 0:00"
+                            style="color:#fff;" />
+
+                    <qpushbutton id="mode_button" connect="toggle_play_mode" />
+
+                    <qslider id="volume_slider"
+                             orientation="h"
+                             min="0" max="100" value="80"
+                             fixed-width="120"
+                             connect="on_volume_slider_changed" />
+
+                </qwidget>
+            </qwidget>
+        </qwidget>
+
+        <!-- Waveform seek bar — без отступов, прилегает вплотную к строке выше -->
+        <qwidget id="seekBarFix" flex="h" margin="0,0,0,0" spacing="0" stretch="0" style="background: #616161;">
+
+                <waveformSeekBar id="position_slider" />
+        </qwidget>
+        
+
+    </qwidget>
+
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         playlistBox: таблица + строка управления плейлистом
+         margin="0" — без внешних отступов, как в оригинале
+         ═══════════════════════════════════════════════════════════════ -->
+    <qwidget id="playlistBox" flex="v"
+             margin="0" spacing="0">
+
+        <qtablewidget id="table" stretch="1" />
+
+        <!-- Строка управления: Add / URL / cookies / Clear / Save / Load
+             spacing="6" соответствует оригинальному playlist_menu.setSpacing(6) -->
+        <qwidget id="playlistMenu" flex="h"
+                 margin="6" spacing="6">
+
+            <qpushbutton id="add_button" text="Add" connect="add_url" />
+
+            <qlineedit id="url_input"
+                       placeholder="URL for yt-dlp"
+                       stretch="1" />
+
+            <fixedComboBox id="cookie_browser"
+                           items="No cookies,Firefox cookies,Chrome cookies,Chromium cookies,Brave cookies,Edge cookies" />
+
+            <qpushbutton id="clear_button" text="Clear" connect="clear_playlist" />
+            <qpushbutton id="save_button"  text="Save"  connect="save_playlist" />
+            <qpushbutton id="load_button"  text="Load"  connect="load_playlist" />
+
+        </qwidget>
+
+    </qwidget>
+
+    <!-- Статусная строка -->
+    <qlabel id="status_label" text="Ready"
+            style="color:#8f8f8f; padding:5px 10px; border-top:1px solid #161616;" />
+
+</qwidget>
