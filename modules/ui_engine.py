@@ -131,6 +131,20 @@ _LAYOUT_MAP: dict[str, Callable[[], QLayout]] = {
     "form": QFormLayout,
 }
 
+_ALIGNMENT_MAP: dict[str, Callable[[], QLayout]] = {
+    "AlignLeft":     Qt.AlignmentFlag.AlignLeft,
+    "AlignRight":    Qt.AlignmentFlag.AlignRight,
+    "AlignHCenter":  Qt.AlignmentFlag.AlignHCenter ,
+    "AlignJustify":  Qt.AlignmentFlag.AlignJustify,
+
+    "AlignTop":      Qt.AlignmentFlag.AlignTop,
+    "AlignBottom":   Qt.AlignmentFlag.AlignBottom ,
+    "AlignVCenter":  Qt.AlignmentFlag.AlignVCenter,
+    "AlignBaseline": Qt.AlignmentFlag.AlignBaseline ,
+
+    "AlignCenter":   Qt.AlignmentFlag.AlignCenter
+}
+
 # Сентинель: «атрибут не указан в XML»
 _MISSING = object()
 
@@ -353,6 +367,7 @@ class UIEngine:
 
         # 9. Layout ────────────────────────────────────────────────────────────
         flex = attrs.get("flex", "").strip().lower()
+        Align = attrs.get("Align", "").strip()
         layout: QLayout | None = None
 
         if flex:
@@ -371,6 +386,12 @@ class UIEngine:
                 layout.setContentsMargins(*_parse_margin(raw_margin))
             else:
                 layout.setContentsMargins(*self.default_margin)
+
+            if Align:
+                Align = _ALIGNMENT_MAP.get(Align, None)
+                if Align:
+                    layout.setAlignment(Align)
+
 
         # 10. Дочерние элементы ────────────────────────────────────────────────
         for child_el in el:

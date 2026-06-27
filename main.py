@@ -35,6 +35,8 @@ from PySide6.QtCore import (
     QPoint,
     QSize,
     Property,
+    QEasingCurve,
+    QEvent,
 )
 from PySide6.QtMultimedia import QAudioBufferOutput, QAudioFormat, QAudioOutput, QMediaPlayer
 from PySide6.QtGui import QBrush, QColor, QFont, QLinearGradient, QPainter, QPixmap,QAction,QIcon
@@ -59,6 +61,9 @@ from PySide6.QtWidgets import (
     QMenu, 
     QListView,
     QSizePolicy,
+    QScroller, 
+    QScrollerProperties,
+    QAbstractItemView,
 )
 from modules.other import GradientImageLabel,FixedComboBox,get_ffmpeg_executable
 from modules.discordrpcWrapper import discordrpcWrapper
@@ -74,7 +79,6 @@ UIEngine.register("fixedComboBox",      FixedComboBox)
 ERROR_REPORTER: Optional["ErrorReporter"] = None
 
 # CAVA-style visualizer tuning
-VISUALIZER_BAR_COUNT = 58
 VISUALIZER_BAR_GAP = 2.0
 VISUALIZER_LEFT_MARGIN = 0
 VISUALIZER_RIGHT_MARGIN = 0
@@ -136,29 +140,30 @@ class ErrorReporter(QObject):
 
 
 class VisualizerWindow(QWidget):
-    def __init__(self,parent=None) -> None:
+    def __init__(self,parent=None,audio_bar_count:int = 58) -> None:
         super().__init__()
         #self.setWindowTitle("MSMP5 Levels")
         #self.setAttribute(Qt.WA_DeleteOnClose)
         #self.resize(VISUALIZER_WINDOW_WIDTH, VISUALIZER_WINDOW_HEIGHT)
-        self.levels = [0.0] * VISUALIZER_BAR_COUNT
-        self.peaks = [0.0] * VISUALIZER_BAR_COUNT
+        self.levels = [0.0] * audio_bar_count
+        self.peaks = [0.0] * audio_bar_count
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.parent=parent
         self._bar_color_low = QColor("#7CFF6B")
         self._bar_color_mid = QColor("#D7FF4A")
         self._bar_color_high = QColor("#FFB347")
         self._bar_color_peak = QColor("#FF5D5D")
+        self.audio_bar_count = audio_bar_count
 
     def set_levels(self, levels: list[float], peaks: Optional[list[float]] = None) -> None:
         if not levels:
             return
-        if len(levels) != VISUALIZER_BAR_COUNT:
-            levels = self.resample_levels(levels, VISUALIZER_BAR_COUNT)
+        if len(levels) != self.audio_bar_count:
+            levels = self.resample_levels(levels, self.audio_bar_count)
         if peaks is None:
             peaks = levels
-        elif len(peaks) != VISUALIZER_BAR_COUNT:
-            peaks = self.resample_levels(peaks, VISUALIZER_BAR_COUNT)
+        elif len(peaks) != self.audio_bar_count:
+            peaks = self.resample_levels(peaks, self.audio_bar_count)
 
         self.levels = [min(1.0, max(0.0, level)) for level in levels]
         self.peaks = [min(1.0, max(0.0, peak)) for peak in peaks]
@@ -238,7 +243,7 @@ class VisualizerWindow(QWidget):
 
         drawable_width = max(1.0, width - left - right)
         drawable_height = max(1.0, height - top - bottom)
-        bar_width = max(5.0, (drawable_width - VISUALIZER_BAR_GAP * (VISUALIZER_BAR_COUNT - 1)) / VISUALIZER_BAR_COUNT)
+        bar_width = max(5.0, (drawable_width - VISUALIZER_BAR_GAP * (self.audio_bar_count - 1)) / self.audio_bar_count)
         base_y = height - bottom
 
         painter.setPen(Qt.NoPen)
@@ -652,15 +657,11 @@ class PlayerWindow(QMainWindow):
 
         #self.visualizer_window: Optional[VisualizerWindow] = None
 
-        self.visualizer_levels = [0.0] * VISUALIZER_BAR_COUNT
-        self.visualizer_peaks = [0.0] * VISUALIZER_BAR_COUNT
-
-        self.visualizer_window = VisualizerWindow()
-        self.visualizer_window.set_levels(self.visualizer_levels, self.visualizer_peaks)
+        #self.visualizer_window = VisualizerWindow()
         #self.visualizer_window.hide()
         #self.visualizer_window.raise_()
-        self.visualizer_window.activateWindow()
-        self.visualizer_window.setFixedSize(233,128)
+        #self.visualizer_window.activateWindow()
+        #self.visualizer_window.setFixedSize(233,128)
 
         self.waveform_cache: dict[str, list[float]] = {}
         self.waveform_generation_indexes: set[int] = set()
@@ -742,7 +743,6 @@ class PlayerWindow(QMainWindow):
         self.cover_background.gradient = [(0.95, QColor(0, 0, 0, 0)), (0.6, QColor(0, 0, 0, 128))]
         self.cover_background.setAlignment(Qt.AlignCenter)
         self.cover_background.setScaledContents(True)
-        self.cover_background.setFixedHeight(210)
         self.cover_background.lower()
         self.cover_background.setGeometry(self.NowDisplay.rect())
 
@@ -815,6 +815,17 @@ class PlayerWindow(QMainWindow):
         self.table.cellDoubleClicked.connect(lambda row, _col: self.play_index(row))
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.show_playlist_menu)
+        self.table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self.table.verticalScrollBar().setSingleStep(1)
+        self.table.viewport().installEventFilter(self)
+        QScroller.grabGesture(self.table.viewport(), QScroller.LeftMouseButtonGesture)
+
+        scroller = QScroller.scroller(self.table.viewport())
+        props = QScrollerProperties()
+        props.setScrollMetric(QScrollerProperties.DragStartDistance, 0.004)
+        props.setScrollMetric(QScrollerProperties.DragVelocitySmoothingFactor, 0.6) # Сделали чуть отзывчивее
+        props.setScrollMetric(QScrollerProperties.ScrollingCurve, QEasingCurve(QEasingCurve.OutCubic))
+        scroller.setScrollerProperties(props)
 
         # ── Политика размера playlistBox ──────────────────────────────────
         self.playlistBox.setMinimumHeight(0)
@@ -824,7 +835,11 @@ class PlayerWindow(QMainWindow):
 
         # ── visualizer_window уже создан движком, инициализируем данные ───
         self.visualizer_window = self.ui["visualizer_window"]
+        self.visualizer_levels = [0.0] * self.visualizer_window.audio_bar_count
+        self.visualizer_peaks = [0.0] * self.visualizer_window.audio_bar_count
+
         self.visualizer_window.set_levels(self.visualizer_levels, self.visualizer_peaks)
+        #self.visualizer_window.setFixedSize(533,328)
         self.visualizer_window.activateWindow()
 
         self.setCentralWidget(container)
@@ -832,6 +847,20 @@ class PlayerWindow(QMainWindow):
         self.setup_mpris()
 
         self.discordrpc = discordrpcWrapper(self)
+
+
+    def eventFilter(self, obj, event):
+        if obj == self.table.viewport() and event.type() == QEvent.Wheel:
+            delta = event.angleDelta().y()
+        
+            scroll_speed = 35 
+            current_value = self.table.verticalScrollBar().value()
+            new_value = current_value - (delta / 120) * scroll_speed
+            self.table.verticalScrollBar().setValue(int(new_value))
+        
+            return True
+        
+        return super().eventFilter(obj, event)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -1800,12 +1829,12 @@ class PlayerWindow(QMainWindow):
         if not raw:
             return []
 
-        bars = [0.0] * VISUALIZER_BAR_COUNT
-        counts = [0] * VISUALIZER_BAR_COUNT
-        frame_step = max(1, frame_count // (VISUALIZER_BAR_COUNT * 24))
+        bars = [0.0] * self.visualizer_window.audio_bar_count
+        counts = [0] * self.visualizer_window.audio_bar_count
+        frame_step = max(1, frame_count // (self.visualizer_window.audio_bar_count * 24))
 
         for frame in range(0, frame_count, frame_step):
-            bar_index = min(VISUALIZER_BAR_COUNT - 1, frame * VISUALIZER_BAR_COUNT // frame_count)
+            bar_index = min(self.visualizer_window.audio_bar_count - 1, frame * self.visualizer_window.audio_bar_count // frame_count)
             frame_offset = frame * bytes_per_frame
             amplitude = 0.0
             used_channels = 0
@@ -1823,7 +1852,7 @@ class PlayerWindow(QMainWindow):
 
         return [
             bars[index] / counts[index] if counts[index] else 0.0
-            for index in range(VISUALIZER_BAR_COUNT)
+            for index in range(self.visualizer_window.audio_bar_count)
         ]
 
     @staticmethod
