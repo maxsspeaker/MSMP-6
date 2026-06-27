@@ -621,14 +621,14 @@ class PlayerWindow(QMainWindow):
         # 5. Показываем меню в точке клика
         menu.exec(self.table.viewport().mapToGlobal(position))
 
-    def __init__(self) -> None:
+    def __init__(self,skin: str) -> None:
         super().__init__()
         self.setWindowTitle("MSMP FoxWave")
         self.resize(820, 760)
 
         self.setWindowIcon(QIcon("resources/MSMPicon.png"))
 
-        self.SkinName="Foxyglass"
+        self.SkinName=skin
 
         self.playlist: list[PlaylistItem] = []
         self.current_index: Optional[int] = None
@@ -1957,6 +1957,12 @@ def main() -> int:
         action='store_true', 
         help="Запустить приложение в полноэкранном режиме"
     )
+    parser.add_argument(
+        '-s', '--skin', 
+        type=str, 
+        default="Foxyglass",
+        help="Установить скин из папки skins"
+    )
     
     # Игнорируем аргументы, которые PySide6 забирает себе автоматически
     args, unknown = parser.parse_known_args()
@@ -1972,7 +1978,7 @@ def main() -> int:
     install_exception_hooks()
 
     sys.excepthook
-    window = PlayerWindow()
+    window = PlayerWindow(args.skin)
     if args.fullscreen:
         window.showFullScreen()
     else:
