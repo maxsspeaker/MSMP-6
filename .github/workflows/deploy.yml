@@ -39,6 +39,20 @@ jobs:
           enable-plugins: pyside6
           include-qt-plugins: multimedia,imageformats,platforms
 
+      - name: Copy resources and skins into dist
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          dist_root="$(find dist -maxdepth 1 -type d -name '*.dist' | head -n 1)"
+          if [ -z "$dist_root" ]; then
+            echo "dist folder not found"
+            exit 1
+          fi
+
+          cp -r resources "$dist_root/resources"
+          cp -r skins "$dist_root/skins"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -66,39 +80,6 @@ jobs:
           pip install -r requirements.txt
           pip install nuitka
 
-      - name: Prepare external tools
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          New-Item -ItemType Directory -Force -Path "external\yt-dlp" | Out-Null
-          New-Item -ItemType Directory -Force -Path "external\deno" | Out-Null
-          New-Item -ItemType Directory -Force -Path "external\ffmpeg" | Out-Null
-
-          # yt-dlp: download the latest Windows exe from the release assets
-          $ytRelease = Invoke-RestMethod "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest"
-          $ytAsset = $ytRelease.assets | Where-Object { $_.name -like "yt-dlp*.exe" } | Select-Object -First 1
-          if (-not $ytAsset) { throw "yt-dlp Windows asset not found" }
-          Invoke-WebRequest $ytAsset.browser_download_url -OutFile "external\yt-dlp\yt-dlp.exe"
-
-          # Deno: official Windows release zip
-          $denoRelease = Invoke-RestMethod "https://api.github.com/repos/denoland/deno/releases/latest"
-          $denoAsset = $denoRelease.assets | Where-Object { $_.name -eq "deno-x86_64-pc-windows-msvc.zip" } | Select-Object -First 1
-          if (-not $denoAsset) { throw "Deno Windows asset not found" }
-          Invoke-WebRequest $denoAsset.browser_download_url -OutFile "$env:TEMP\deno.zip"
-          Expand-Archive "$env:TEMP\deno.zip" -DestinationPath "$env:TEMP\deno_unpack" -Force
-          Copy-Item "$env:TEMP\deno_unpack\deno.exe" "external\deno\deno.exe" -Force
-
-          # FFmpeg: ready-made Windows build
-          $ffRelease = Invoke-RestMethod "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest"
-          $ffAsset = $ffRelease.assets | Where-Object { $_.name -eq "ffmpeg-master-latest-win64-gpl-shared.zip" } | Select-Object -First 1
-          if (-not $ffAsset) { throw "FFmpeg Windows asset not found" }
-          Invoke-WebRequest $ffAsset.browser_download_url -OutFile "$env:TEMP\ffmpeg.zip"
-          Expand-Archive "$env:TEMP\ffmpeg.zip" -DestinationPath "$env:TEMP\ffmpeg_unpack" -Force
-
-          $ffRoot = Get-ChildItem "$env:TEMP\ffmpeg_unpack" -Directory | Select-Object -First 1
-          Copy-Item "$ffRoot\bin\*" "external\ffmpeg\" -Force
-
       - name: Build with Nuitka
         uses: Nuitka/Nuitka-Action@main
         with:
@@ -110,6 +91,53 @@ jobs:
           windows-icon-from-ico: resources/icon.ico
           enable-plugins: pyside6
           include-qt-plugins: multimedia,imageformats,platforms
+
+
+      - name: Prepare external tools
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $distRoot = Get-ChildItem dist -Directory | Where-Object { $_.Name -like "*.dist" } | Select-Object -First 1
+          if (-not $distRoot) { throw "dist folder not found" }
+
+          New-Item -ItemType Directory -Force -Path "$($distRoot.FullName)\external\yt-dlp" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$($distRoot.FullName)\external\ffmpeg" | Out-Null
+
+          # yt-dlp: download the latest Windows exe from the release assets
+          $ytRelease = Invoke-RestMethod "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest"
+          $ytAsset = $ytRelease.assets | Where-Object { $_.name -like "yt-dlp*.exe" } | Select-Object -First 1
+          if (-not $ytAsset) { throw "yt-dlp Windows asset not found" }
+          Invoke-WebRequest $ytAsset.browser_download_url -OutFile "($distRoot.FullName)\external\yt-dlp\yt-dlp.exe"
+
+          # Deno: official Windows release zip
+          $denoRelease = Invoke-RestMethod "https://api.github.com/repos/denoland/deno/releases/latest"
+          $denoAsset = $denoRelease.assets | Where-Object { $_.name -eq "deno-x86_64-pc-windows-msvc.zip" } | Select-Object -First 1
+          if (-not $denoAsset) { throw "Deno Windows asset not found" }
+          Invoke-WebRequest $denoAsset.browser_download_url -OutFile "$env:TEMP\deno.zip"
+          Expand-Archive "$env:TEMP\deno.zip" -DestinationPath "$env:TEMP\deno_unpack" -Force
+          Copy-Item "$env:TEMP\deno_unpack\deno.exe" "($distRoot.FullName)\external\yt-dlp\deno.exe" -Force
+
+          # FFmpeg: ready-made Windows build
+          $ffRelease = Invoke-RestMethod "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest"
+          $ffAsset = $ffRelease.assets | Where-Object { $_.name -eq "ffmpeg-master-latest-win64-gpl-shared.zip" } | Select-Object -First 1
+          if (-not $ffAsset) { throw "FFmpeg Windows asset not found" }
+          Invoke-WebRequest $ffAsset.browser_download_url -OutFile "$env:TEMP\ffmpeg.zip"
+          Expand-Archive "$env:TEMP\ffmpeg.zip" -DestinationPath "$env:TEMP\ffmpeg_unpack" -Force
+
+          $ffRoot = Get-ChildItem "$env:TEMP\ffmpeg_unpack" -Directory | Select-Object -First 1
+          Copy-Item "$ffRoot\bin\*" "($distRoot.FullName)\external\ffmpeg\" -Force
+
+
+
+      - name: Copy resources and skins into dist
+        shell: pwsh
+        run: |
+          $distRoot = Get-ChildItem dist -Directory | Where-Object { $_.Name -like "*.dist" } | Select-Object -First 1
+          if (-not $distRoot) { throw "dist folder not found" }
+
+          Copy-Item -Recurse -Force resources "$($distRoot.FullName)\resources"
+          Copy-Item -Recurse -Force skins "$($distRoot.FullName)\skins"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
