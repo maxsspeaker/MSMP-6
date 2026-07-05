@@ -212,7 +212,8 @@ class FixedComboBox(QComboBox):
 
 def LocalSaveDir():
     if (sys.platform == "linux"):
-        return os.path.join("~/.config","MSMP-Stream","6.0")
+        os.makedirs(os.path.join(os.path.expanduser('~'),".config","MSMP-Stream","6.0"), exist_ok=True)
+        return os.path.join(os.path.expanduser('~'),".config","MSMP-Stream","6.0")
     elif (sys.platform == "win32"):
         if "__compiled__" in globals(): # I'm too lazy to support Windows for now.
             return os.path.dirname(os.path.abspath(sys.argv[0]))

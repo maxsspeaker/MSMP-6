@@ -66,11 +66,12 @@ from PySide6.QtWidgets import (
     QScrollerProperties,
     QAbstractItemView,
 )
-from modules.other import GradientImageLabel,FixedComboBox,get_ffmpeg_executable
+from modules.other import GradientImageLabel,FixedComboBox,get_ffmpeg_executable,LocalSaveDir
 from modules.discordrpcWrapper import discordrpcWrapper
 from modules.types import *
 from modules.dbus import MprisServer
 from modules.ui_engine import UIEngine
+from modules.AudioStatsDb import AudioStatsDb
 from modules import extractors
 
 UIEngine.register("gradientImageLabel", GradientImageLabel)
@@ -636,6 +637,8 @@ class PlayerWindow(QMainWindow):
 
         self.SkinName=skin
 
+        self.db=AudioStatsDb(db_name=os.path.join(LocalSaveDir(),"music.db"))
+
         self.playlist: list[PlaylistItem] = []
         self.current_index: Optional[int] = None
         self.pending_position = 0
@@ -848,6 +851,8 @@ class PlayerWindow(QMainWindow):
         self.setup_mpris()
 
         self.discordrpc = discordrpcWrapper(self)
+
+        self.load_playlist(path=os.path.join(LocalSaveDir(),"autosave.plmsmpsbox"),isautosave=True)
 
 
     def eventFilter(self, obj, event):
@@ -1140,6 +1145,8 @@ class PlayerWindow(QMainWindow):
             return
 
         if self.current_index is not None:
+            if(self.db):
+                self.db.increment_plays(self.playlist[self.current_index])
             self.player.play()
             self.start_mpris_position_updates()
             self.sync_mpris_position()
@@ -1224,6 +1231,9 @@ class PlayerWindow(QMainWindow):
                 600,
                 lambda pos=restored_position: self.set_player_position(pos, emit_seeked=False),
             )
+        else:
+            if(self.db):
+                self.db.increment_plays(item)
 
     def play_next(self) -> None:
         if not self.playlist:
@@ -1335,15 +1345,16 @@ class PlayerWindow(QMainWindow):
         except OSError as exc:
             QMessageBox.warning(self, "Save failed", str(exc))
 
-    def load_playlist(self) -> None:
-        path, _filter = QFileDialog.getOpenFileName(
-            self,
-            "Load playlist",
-            os.path.expanduser("~")+"/.config/MSMP-Stream/5.0/MyPlaylists/",
-            "MSMP playlist (*.plmsmpsbox);;JSON playlists (*.json);;All files (*)",
-        )
-        if not path:
-            return
+    def load_playlist(self,path=None,isautosave=False) -> None:
+        if not(path):
+            path, _filter = QFileDialog.getOpenFileName(
+                self,
+                "Load playlist",
+                os.path.expanduser("~")+"/.config/MSMP-Stream/5.0/MyPlaylists/",
+                "MSMP playlist (*.plmsmpsbox);;JSON playlists (*.json);;All files (*)",
+            )
+            if not path:
+                return
 
         try:
             with open(path, "r", encoding="utf-8") as file:
@@ -1360,6 +1371,13 @@ class PlayerWindow(QMainWindow):
                 "CanGoPrevious": bool(self.playlist),
                 "CanPlay": bool(self.playlist),
             })
+            if(isautosave):
+                QTimer.singleShot(0, lambda: self.table.verticalScrollBar().setValue(data["ScrollBarState"]))
+
+                #self.resolve_item(index, auto_play=True)
+            else:
+                QTimer.singleShot(0, lambda: self.table.verticalScrollBar().setValue(0))
+
         except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
             QMessageBox.warning(self, "Load failed", str(exc))
 
@@ -1900,7 +1918,6 @@ class PlayerWindow(QMainWindow):
         self.emit_mpris_properties_changed("org.mpris.MediaPlayer2.Player", {
             "Volume": value / 100,
         })
-
     def on_volume_slider_changed(self, value: int) -> None:
         """Слот для volume_slider из XML (connect=). Делегирует в оба получателя."""
         self.audio_output.setVolume(value / 100)
@@ -1911,6 +1928,17 @@ class PlayerWindow(QMainWindow):
             self.setStyleSheet(f.read())
 
     def closeEvent(self, event) -> None:
+        if(self.db):
+            self.db.close()
+
+        data = self.to_msmp_playlist()
+        data["ScrollBarState"]=self.table.verticalScrollBar().value()
+        try:
+            with open(os.path.join(LocalSaveDir(),"autosave.plmsmpsbox"), "w", encoding="utf-8") as file:
+                json.dump(data, file, ensure_ascii=False, indent=2)
+        except OSError as exc:
+            pass
+
         self.mpris_server.stop()
         super().closeEvent(event)
 
@@ -1981,7 +2009,7 @@ def excepthook(exc_type, exc_value, exc_tb):
 
 def main() -> int:
 
-    parser = argparse.ArgumentParser(description="PySide6 Fullscreen App")
+    parser = argparse.ArgumentParser(description="MSMP FoxWave media player")
     parser.add_argument(
         '-f', '--fullscreen', 
         action='store_true', 
