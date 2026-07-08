@@ -69,6 +69,7 @@ from PySide6.QtWidgets import (
 from modules.other import GradientImageLabel,FixedComboBox,get_ffmpeg_executable,LocalSaveDir
 from modules.discordrpcWrapper import discordrpcWrapper
 from modules.types import *
+from modules.pluginLoader import PluginLoader
 from modules.dbus import MprisServer
 from modules.ui_engine import UIEngine
 from modules.AudioStatsDb import AudioStatsDb
@@ -79,32 +80,6 @@ UIEngine.register("fixedComboBox",      FixedComboBox)
 
 
 ERROR_REPORTER: Optional["ErrorReporter"] = None
-
-# CAVA-style visualizer tuning
-VISUALIZER_BAR_GAP = 2.0
-VISUALIZER_LEFT_MARGIN = 0
-VISUALIZER_RIGHT_MARGIN = 0
-VISUALIZER_TOP_MARGIN = 12
-VISUALIZER_BOTTOM_MARGIN = 12
-VISUALIZER_MIN_BAR_HEIGHT = 1
-
-VISUALIZER_GAIN = 1.0
-VISUALIZER_ATTACK = 0.42
-VISUALIZER_DECAY = 0.020
-VISUALIZER_PEAK_DECAY = 0.010
-VISUALIZER_MIN_VISIBLE_LEVEL = 0.012
-
-#VISUALIZER_WINDOW_WIDTH = 250
-#VISUALIZER_WINDOW_HEIGHT = 128
-VISUALIZER_BACKGROUND_COLOR = "#000000"
-VISUALIZER_TRACK_COLOR = "#00000000"
-VISUALIZER_BAR_COLOR_LOW = "#7CFF6B"
-VISUALIZER_BAR_COLOR_MID = "#D7FF4A"
-VISUALIZER_BAR_COLOR_HIGH = "#FFB347"
-VISUALIZER_BAR_COLOR_PEAK = "#FF5D5D"
-VISUALIZER_BAR_OUTLINE = "#00000000"
-VISUALIZER_PEAK_HEIGHT = 3.0
-VISUALIZER_CORNER_RADIUS = 3
 
 WAVEFORM_BIN_COUNT = 440
 WAVEFORM_BACKGROUND_COLOR = "#00000000"
@@ -140,6 +115,32 @@ class ErrorReporter(QObject):
         box.setDetailedText(details)
         box.exec()
 
+
+# CAVA-style visualizer tuning
+VISUALIZER_BAR_GAP = 2.0
+VISUALIZER_LEFT_MARGIN = 0
+VISUALIZER_RIGHT_MARGIN = 0
+VISUALIZER_TOP_MARGIN = 12
+VISUALIZER_BOTTOM_MARGIN = 12
+VISUALIZER_MIN_BAR_HEIGHT = 1
+
+VISUALIZER_GAIN = 1.0
+VISUALIZER_ATTACK = 0.42
+VISUALIZER_DECAY = 0.020
+VISUALIZER_PEAK_DECAY = 0.010
+VISUALIZER_MIN_VISIBLE_LEVEL = 0.012
+
+#VISUALIZER_WINDOW_WIDTH = 250
+#VISUALIZER_WINDOW_HEIGHT = 128
+VISUALIZER_BACKGROUND_COLOR = "#000000"
+VISUALIZER_TRACK_COLOR = "#00000000"
+VISUALIZER_BAR_COLOR_LOW = "#7CFF6B"
+VISUALIZER_BAR_COLOR_MID = "#D7FF4A"
+VISUALIZER_BAR_COLOR_HIGH = "#FFB347"
+VISUALIZER_BAR_COLOR_PEAK = "#FF5D5D"
+VISUALIZER_BAR_OUTLINE = "#00000000"
+VISUALIZER_PEAK_HEIGHT = 3.0
+VISUALIZER_CORNER_RADIUS = 3
 
 class VisualizerWindow(QWidget):
     def __init__(self,parent=None,audio_bar_count:int = 58) -> None:
@@ -661,11 +662,6 @@ class PlayerWindow(QMainWindow):
 
         #self.visualizer_window: Optional[VisualizerWindow] = None
 
-        #self.visualizer_window = VisualizerWindow()
-        #self.visualizer_window.hide()
-        #self.visualizer_window.raise_()
-        #self.visualizer_window.activateWindow()
-        #self.visualizer_window.setFixedSize(233,128)
 
         self.waveform_cache: dict[str, list[float]] = {}
         self.waveform_generation_indexes: set[int] = set()
@@ -741,6 +737,14 @@ class PlayerWindow(QMainWindow):
         self.mode_button         = self.ui["mode_button"]
         self.playlistBox         = self.ui["playlistBox"]
         self.table               = self.ui["table"]
+
+
+        self.visualizer_window = self.ui["visualizer_window"]#StarFildedWindow(audio_bar_count=164)
+        self.visualizer_window.raise_()
+        self.visualizer_window.activateWindow()
+        #self.visualizer_window.setFixedSize(233,128)
+
+        #self.visualizer_window.start()
 
         # ── cover_background: создаётся вручную (нестандартные аргументы) ─
 
@@ -838,7 +842,7 @@ class PlayerWindow(QMainWindow):
         self.playlistBox.setSizePolicy(sp)
 
         # ── visualizer_window уже создан движком, инициализируем данные ───
-        self.visualizer_window = self.ui["visualizer_window"]
+        #self.visualizer_window = self.ui["visualizer_window"]
         self.visualizer_levels = [0.0] * self.visualizer_window.audio_bar_count
         self.visualizer_peaks = [0.0] * self.visualizer_window.audio_bar_count
 
@@ -846,11 +850,16 @@ class PlayerWindow(QMainWindow):
         #self.visualizer_window.setFixedSize(533,328)
         self.visualizer_window.activateWindow()
 
+        self.visualizer_window.show()
+
         self.setCentralWidget(container)
         self.apply_style()
         self.setup_mpris()
 
         self.discordrpc = discordrpcWrapper(self)
+
+        self.plugin_loader = PluginLoader()
+        self.plugin_loader.load_all(context=self)
 
         self.load_playlist(path=os.path.join(LocalSaveDir(),"autosave.plmsmpsbox"),isautosave=True)
 

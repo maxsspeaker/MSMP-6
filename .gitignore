@@ -136,3 +136,5 @@ logs/
 
 blacklist.json
 stats.db
+
+plugins
