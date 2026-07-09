@@ -1,4 +1,22 @@
 from dataclasses import dataclass, field
+from PySide6.QtCore import QObject, Signal
+
+
+class PlayerEvents(QObject):
+    # Воспроизведение
+    on_playback_started = Signal()             # Плеер начал играть
+    on_playback_paused = Signal()              # Плеер поставлен на паузу
+    on_playback_stopped = Signal()             # Плеер остановлен
+    on_start_playback = Signal(int)               # Загрузил воспроизведение
+    
+    # Файлы и данные
+    on_playlist_opened = Signal(str, list)       # Передаем путь к плейлисту (str) и кол-во треков (int)
+    on_playlist_saved = Signal(str, list)       # Передаем путь к плейлисту (str) и кол-во треков (int)
+    
+    # Жизненный цикл программы
+    on_app_closing = Signal()                  # Программа закрывается (шанс для плагинов сохранить настройки)
+
+
 
 @dataclass
 class PlaylistItem:

@@ -66,7 +66,7 @@ from PySide6.QtWidgets import (
     QScrollerProperties,
     QAbstractItemView,
 )
-from modules.other import GradientImageLabel,FixedComboBox,get_ffmpeg_executable,LocalSaveDir
+from modules.other import GradientImageLabel,FixedComboBox,SystemMenuBar,get_ffmpeg_executable,LocalSaveDir
 from modules.discordrpcWrapper import discordrpcWrapper
 from modules.types import *
 from modules.pluginLoader import PluginLoader
@@ -77,6 +77,7 @@ from modules import extractors
 
 UIEngine.register("gradientImageLabel", GradientImageLabel)
 UIEngine.register("fixedComboBox",      FixedComboBox)
+UIEngine.register("systemmenubar",      SystemMenuBar)
 
 
 ERROR_REPORTER: Optional["ErrorReporter"] = None
@@ -637,6 +638,7 @@ class PlayerWindow(QMainWindow):
         self.setWindowIcon(QIcon("resources/MSMPicon.png"))
 
         self.SkinName=skin
+        self.events = PlayerEvents()
 
         self.db=AudioStatsDb(db_name=os.path.join(LocalSaveDir(),"music.db"))
 
@@ -651,12 +653,24 @@ class PlayerWindow(QMainWindow):
         self.error_boxes: list[QMessageBox] = []
         self.playlist_title = "MSMP5 Playlist"
         self.playlist_image_url = "https://msmp.maxsspeaker.space/static/img/Missing.png"
+
         self.mpris_server = MprisServer()
         self.mpris_playback_status = "Stopped"
         self.mpris_position_timer = QTimer(self)
         self.mpris_position_timer.setInterval(250)
         self.mpris_position_timer.setTimerType(Qt.PreciseTimer)
         self.mpris_position_timer.timeout.connect(self.sync_mpris_position)
+
+        self.thread_pool = QThreadPool.globalInstance()
+        
+        self.resolve_signals = extractors.ResolveSignals()
+        self.resolve_signals.resolved.connect(self.on_resolved)
+        self.resolve_signals.failed.connect(self.on_resolve_failed)
+
+        self.jam_signals = extractors.JamPlaylistSignals()
+        self.jam_signals.parsed.connect(self.on_jam_playlist_parsed)
+        self.jam_signals.status.connect(self.on_jam_playlist_status)
+        self.jam_signals.failed.connect(self.on_jam_playlist_failed)
 
         self._last_mpris_position_us = -1
 
@@ -666,17 +680,10 @@ class PlayerWindow(QMainWindow):
         self.waveform_cache: dict[str, list[float]] = {}
         self.waveform_generation_indexes: set[int] = set()
 
-        self.thread_pool = QThreadPool.globalInstance()
-        self.resolve_signals = extractors.ResolveSignals()
-        self.resolve_signals.resolved.connect(self.on_resolved)
-        self.resolve_signals.failed.connect(self.on_resolve_failed)
-        self.jam_signals = extractors.JamPlaylistSignals()
-        self.jam_signals.parsed.connect(self.on_jam_playlist_parsed)
-        self.jam_signals.status.connect(self.on_jam_playlist_status)
-        self.jam_signals.failed.connect(self.on_jam_playlist_failed)
         self.waveform_signals = WaveformSignals()
         self.waveform_signals.generated.connect(self.on_waveform_generated)
         self.waveform_signals.failed.connect(self.on_waveform_failed)
+
         self.network = QNetworkAccessManager(self)
         self.network.finished.connect(self.on_artwork_loaded)
 
@@ -686,7 +693,6 @@ class PlayerWindow(QMainWindow):
         self.player.setAudioOutput(self.audio_output)
         self.player.setAudioBufferOutput(self.audio_buffer_output)
         self.audio_output.setVolume(0.8)
-        self.audio_buffer_output.audioBufferReceived.connect(self.on_audio_buffer_received)
 
         self.player.positionChanged.connect(self.on_position_changed)
         self.player.durationChanged.connect(self.on_duration_changed)
@@ -737,16 +743,26 @@ class PlayerWindow(QMainWindow):
         self.mode_button         = self.ui["mode_button"]
         self.playlistBox         = self.ui["playlistBox"]
         self.table               = self.ui["table"]
+        self.MainMenuBar         = self.ui["MainMenuBar"]
 
 
-        self.visualizer_window = self.ui["visualizer_window"]#StarFildedWindow(audio_bar_count=164)
-        self.visualizer_window.raise_()
-        self.visualizer_window.activateWindow()
-        #self.visualizer_window.setFixedSize(233,128)
+        file_menu = self.MainMenuBar.add_menu("Menu")
+        file_menu.addAction("About")
+        self.PlguinMenu=self.MainMenuBar.add_submenu(file_menu, "Plugins")
+        file_menu.addSeparator()
+        file_menu.addAction("Exit", self.close)
+        file_menu.addSeparator()
 
-        #self.visualizer_window.start()
 
-        # ── cover_background: создаётся вручную (нестандартные аргументы) ─
+
+        self.visualizer_window = self.ui.get("visualizer_window")#StarFildedWindow(audio_bar_count=164)
+        if(self.visualizer_window):
+            self.visualizer_window.raise_()
+            self.visualizer_window.activateWindow()
+
+            self.audio_buffer_output.audioBufferReceived.connect(self.on_audio_buffer_received)
+
+            self.visualizer_window.show()
 
         self.cover_background.gradient = [(0.95, QColor(0, 0, 0, 0)), (0.6, QColor(0, 0, 0, 128))]
         self.cover_background.setAlignment(Qt.AlignCenter)
@@ -757,7 +773,6 @@ class PlayerWindow(QMainWindow):
         self.track_title_label.setText("No track")
         self.artist_label.setText("Unknown artist")
         self.album_label.setText("Unknown album")
-
 
         # ── Донастройка cover_label ────────────────────────────────────────
         self.cover_label.setAlignment(Qt.AlignCenter)
@@ -785,7 +800,8 @@ class PlayerWindow(QMainWindow):
             (self.next_button,    "resources/next.svg"),
             (self.restart_button, "resources/reload-audio.svg"),
         ):
-            btn.setIcon(QIcon(icon_file))
+            if(btn):
+                btn.setIcon(QIcon(icon_file))
 
         self.mode_button.setIcon(QIcon(self.PLAY_MODES_icons[self.play_mode_index]))
 
@@ -841,16 +857,6 @@ class PlayerWindow(QMainWindow):
         sp.setVerticalPolicy(QSizePolicy.Policy.Ignored)
         self.playlistBox.setSizePolicy(sp)
 
-        # ── visualizer_window уже создан движком, инициализируем данные ───
-        #self.visualizer_window = self.ui["visualizer_window"]
-        self.visualizer_levels = [0.0] * self.visualizer_window.audio_bar_count
-        self.visualizer_peaks = [0.0] * self.visualizer_window.audio_bar_count
-
-        self.visualizer_window.set_levels(self.visualizer_levels, self.visualizer_peaks)
-        #self.visualizer_window.setFixedSize(533,328)
-        self.visualizer_window.activateWindow()
-
-        self.visualizer_window.show()
 
         self.setCentralWidget(container)
         self.apply_style()
@@ -861,7 +867,8 @@ class PlayerWindow(QMainWindow):
         self.plugin_loader = PluginLoader()
         self.plugin_loader.load_all(context=self)
 
-        self.load_playlist(path=os.path.join(LocalSaveDir(),"autosave.plmsmpsbox"),isautosave=True)
+        if(os.path.isfile(os.path.join(LocalSaveDir(),"autosave.plmsmpsbox"))):
+            self.load_playlist(path=os.path.join(LocalSaveDir(),"autosave.plmsmpsbox"),isautosave=True)
 
 
     def eventFilter(self, obj, event):
@@ -1163,10 +1170,13 @@ class PlayerWindow(QMainWindow):
         elif self.playlist:
             self.play_index(0)
 
+        self.events.on_playback_started.emit()
+
     def pause_playback(self) -> None:
         self.player.pause()
         self.sync_mpris_position()
         self.set_mpris_playback_status("Paused")
+        self.events.on_playback_paused.emit()
 
     def stop_playback(self) -> None:
         self.stop_mpris_position_updates()
@@ -1176,6 +1186,7 @@ class PlayerWindow(QMainWindow):
         self.update_buffer_progress(0.0)
         self.set_mpris_playback_status("Stopped")
         self.update_mpris_player_properties({"Position": 0})
+        self.events.on_playback_stopped.emit()
 
     def set_mpris_playback_status(self, status: str) -> None:
         if status not in {"Playing", "Paused", "Stopped"}:
@@ -1187,9 +1198,6 @@ class PlayerWindow(QMainWindow):
         self.emit_mpris_properties_changed("org.mpris.MediaPlayer2.Player", {
             "PlaybackStatus": status,
         })
-
-    def on_visualizer_closed(self, _obj=None) -> None:
-        self.visualizer_window = None
 
     def play_index(self, index: int) -> None:
         if index < 0 or index >= len(self.playlist):
@@ -1241,6 +1249,7 @@ class PlayerWindow(QMainWindow):
                 lambda pos=restored_position: self.set_player_position(pos, emit_seeked=False),
             )
         else:
+            self.events.on_start_playback.emit(index)
             if(self.db):
                 self.db.increment_plays(item)
 
@@ -1351,6 +1360,7 @@ class PlayerWindow(QMainWindow):
             with open(path, "w", encoding="utf-8") as file:
                 json.dump(data, file, ensure_ascii=False, indent=2)
             self.status_label.setText(f"Playlist saved: {path}")
+            self.events.on_playlist_saved.emit(path,self.playlist)
         except OSError as exc:
             QMessageBox.warning(self, "Save failed", str(exc))
 
@@ -1386,6 +1396,7 @@ class PlayerWindow(QMainWindow):
                 #self.resolve_item(index, auto_play=True)
             else:
                 QTimer.singleShot(0, lambda: self.table.verticalScrollBar().setValue(0))
+            self.events.on_playlist_opened.emit(path,self.playlist)
 
         except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
             QMessageBox.warning(self, "Load failed", str(exc))
@@ -1653,7 +1664,7 @@ class PlayerWindow(QMainWindow):
             return 0
         return None
 
-    def on_media_status_changed(self, status: QMediaPlayer.MediaStatus) -> None:
+    def on_media_status_changed(self, status: QMediaPlayer.MediaStatus) -> None: 
         loading_states = {
             QMediaPlayer.LoadingMedia,
             QMediaPlayer.BufferingMedia,
@@ -1899,7 +1910,6 @@ class PlayerWindow(QMainWindow):
         if not self.user_dragging:
             self.position_slider.setValue(position)
         self.update_time_label(position, self.player.duration())
-        self.sync_mpris_position(position)
 
     def on_duration_changed(self, duration: int) -> None:
         self.position_slider.setRange(0, max(0, duration))
@@ -1939,6 +1949,8 @@ class PlayerWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         if(self.db):
             self.db.close()
+
+        self.events.on_app_closing.emit()
 
         data = self.to_msmp_playlist()
         data["ScrollBarState"]=self.table.verticalScrollBar().value()

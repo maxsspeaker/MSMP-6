@@ -2,16 +2,15 @@ import random,hashlib
 import os,sys
 from PySide6.QtWidgets import (
     QApplication, QWidget, QPushButton, QVBoxLayout,
-    QHBoxLayout, QGraphicsOpacityEffect, QLabel, QGraphicsBlurEffect,QComboBox,QFrame,QStyleOptionViewItem,QListView,QStyledItemDelegate, QStyle
+    QHBoxLayout, QGraphicsOpacityEffect, QLabel, QGraphicsBlurEffect,QComboBox,QFrame,QStyleOptionViewItem,QListView,QStyledItemDelegate, QStyle,QMenu, QStyleOption
 )
-from PySide6.QtGui import QColor,QPixmap, QPainter, QLinearGradient, QImage,QPalette, QPen, QBrush
-from PySide6.QtCore import QPropertyAnimation, QRect, QEasingCurve, Qt,QObject, QProcess,QParallelAnimationGroup,QSize
+from PySide6.QtGui import QColor,QPixmap, QPainter, QLinearGradient, QImage,QPalette, QPen, QBrush,QAction
+from PySide6.QtCore import QPropertyAnimation, QRect, QEasingCurve, Qt, Signal,QObject, QProcess,QParallelAnimationGroup,QSize
 import __main__ 
 import re
 import subprocess
 import shutil
 import json
-
 
 class GradientImageLabel(QLabel):
     def __init__(self, parent=None,gradient:list = [],blur_effect:int = 0):
@@ -98,7 +97,6 @@ class GradientImageLabel(QLabel):
         """При ресайзе картинка автоматически перекадрируется и центрируется заново"""
         super().resizeEvent(event)
         self.update_gradient_mask()
-
 
 
 
@@ -208,6 +206,103 @@ class FixedComboBox(QComboBox):
         if popup:
             popup.setContentsMargins(0, 0, 0, 0)
             popup.setStyleSheet("background: #1e1e1e; border: none; outline: none;")
+
+
+class SystemMenuBar(QWidget):
+    
+    def __init__(self, parent=None, bg_color="rgba(40, 40, 40, 255)"):
+        super().__init__(parent)
+        self.setObjectName("MainMenuBar")
+        
+        self.layout = QHBoxLayout(self)
+        self.layout.setContentsMargins(10, 0, 10, 0)
+        self.layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        
+        self.menus = {}
+
+        self.setStyleSheet(f"""
+            QWidget#MainMenuBar {{
+                background-color: rgba(0, 0, 0, 50); 
+            }}
+            QWidget#MainMenuBar QPushButton {{
+                background-color: transparent;
+                color: white;
+                font-family: 'Segoe UI', Arial;
+                font-size: 13px;
+                padding: 0px 6px;
+                border: none;
+                border-radius: 0px;
+            }}
+            QWidget#MainMenuBar QPushButton:hover {{
+                background-color: rgba(255, 255, 255, 40);
+            }}
+            QWidget#MainMenuBar QPushButton::menu-indicator {{
+                image: none; 
+            }}
+        """)
+
+    def add_menu(self, title: str) -> QMenu:
+        btn = QPushButton(title, self)
+        menu = QMenu(self)
+        btn.setMenu(menu)
+        
+        self.layout.addWidget(btn)
+        self.menus[title] = menu
+        return menu
+
+    def _ensure_visible_chain(self, menu: QMenu):
+        if menu is None:
+            return
+        
+        if menu.menuAction():
+            menu.menuAction().setVisible(True)
+            
+        parent = menu.parent()
+        if isinstance(parent, QMenu):
+            self._ensure_visible_chain(parent)
+
+    def add_action(self, target_menu: QMenu | str, action_text: str, trigger_slot=None) -> QAction:
+        if isinstance(target_menu, str):
+            if target_menu not in self.menus:
+                self.add_menu(target_menu)
+            parent_menu = self.menus[target_menu]
+        else:
+            parent_menu = target_menu
+            
+        action = QAction(action_text, self)
+        if trigger_slot:
+            action.triggered.connect(trigger_slot)
+            
+        parent_menu.addAction(action)
+        self._ensure_visible_chain(parent_menu)
+            
+        return action
+
+    def add_submenu(self, parent_menu: QMenu | str, title: str, hide_if_empty: bool = True) -> QMenu:
+        if isinstance(parent_menu, str):
+            if parent_menu not in self.menus:
+                self.add_menu(parent_menu)
+            parent_menu = self.menus[parent_menu]
+            
+        submenu = QMenu(title, parent_menu) 
+        
+        parent_menu.addMenu(submenu)
+
+        if hide_if_empty:
+            submenu.menuAction().setVisible(False)
+
+        self._ensure_visible_chain(parent_menu)
+            
+        return submenu
+
+
+    def paintEvent(self, event):
+        opt = QStyleOption()
+        opt.initFrom(self)
+        p = QPainter(self)
+        self.style().drawPrimitive(QStyle.PrimitiveElement.PE_Widget, opt, p, self)
+        super().paintEvent(event)
+
 
 
 def LocalSaveDir():

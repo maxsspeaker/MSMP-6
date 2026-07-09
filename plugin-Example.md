@@ -8,10 +8,13 @@ from PySide6.QtGui import QAction
 from modules.types import PluginBase
 from . import helper
 
-class FolderExamplePlugin(PluginBase):
+class ExamplePlugin(PluginBase):
     def init_plugin(self):
         self.my_folder = os.path.dirname(__file__)
-        self.show_dialog()
+
+        self.StarFildMenu=self.main_window.MainMenuBar.add_submenu(self.main_window.PlguinMenu, "hello_world_plugin", hide_if_empty=False)
+
+        self.StarFildMenu.addAction("Show Message", self.show_dialog)
 
     def show_dialog(self):
         QMessageBox.information(
