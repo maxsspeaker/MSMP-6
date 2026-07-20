@@ -73,6 +73,7 @@ from modules.pluginLoader import PluginLoader
 from modules.dbus import MprisServer
 from modules.ui_engine import UIEngine
 from modules.AudioStatsDb import AudioStatsDb
+from modules.AboutWindow import AboutWindow
 from modules import extractors
 
 UIEngine.register("gradientImageLabel", GradientImageLabel)
@@ -750,7 +751,7 @@ class PlayerWindow(QMainWindow):
 
 
         file_menu = self.MainMenuBar.add_menu("Menu")
-        file_menu.addAction("About")
+        file_menu.addAction("About",lambda:AboutWindow(self).exec())
         self.PlguinMenu=self.MainMenuBar.add_submenu(file_menu, "Plugins")
         file_menu.addSeparator()
         file_menu.addAction("Exit", self.close)
