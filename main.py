@@ -642,6 +642,9 @@ class PlayerWindow(QMainWindow):
 
         self.db=AudioStatsDb(db_name=os.path.join(LocalSaveDir(),"music.db"))
 
+        self.plugin_loader = PluginLoader()
+        self.plugin_loader.load_all(context=self)
+
         self.playlist: list[PlaylistItem] = []
         self.current_index: Optional[int] = None
         self.pending_position = 0
@@ -864,8 +867,7 @@ class PlayerWindow(QMainWindow):
 
         self.discordrpc = discordrpcWrapper(self)
 
-        self.plugin_loader = PluginLoader()
-        self.plugin_loader.load_all(context=self)
+        self.plugin_loader.init_all(context=self)
 
         if(os.path.isfile(os.path.join(LocalSaveDir(),"autosave.plmsmpsbox"))):
             self.load_playlist(path=os.path.join(LocalSaveDir(),"autosave.plmsmpsbox"),isautosave=True)

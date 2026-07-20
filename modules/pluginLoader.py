@@ -19,6 +19,16 @@ class PluginLoader:
         if self.base_dir not in sys.path:
             sys.path.insert(0, self.base_dir)
 
+    def init_all(self, context):
+        try:
+            for plugin_instance in self.loaded_plugins:
+                if(hasattr(plugin_instance, 'init_plugin')):
+                    plugin_instance.init_plugin()
+
+        except Exception as e:
+            details = traceback.format_exc()
+            print(f"Ошибка иницизилации: {details}")
+
     def load_all(self, context):
         if not os.path.exists(self.plugins_dir):
             os.makedirs(self.plugins_dir)
@@ -48,7 +58,8 @@ class PluginLoader:
                     attribute is not PluginBase):
                     
                     plugin_instance = attribute(context)
-                    plugin_instance.init_plugin()
+                    if(hasattr(plugin_instance, 'awake_plugin')):
+                        plugin_instance.awake_plugin()
                     
                     self.loaded_plugins.append(plugin_instance)
                     print(f"✅ Загружен плагин: {folder_name}")
