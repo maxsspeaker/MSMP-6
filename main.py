@@ -420,11 +420,10 @@ class WaveformSeekBar(QWidget):
                 bin_width = max(1.0, inner.width() / float(bin_count))
                 played_index = 0
                 if self._maximum > self._minimum:
-                    played_index = int(
-                        (self._value - self._minimum)
-                        / float(self._maximum - self._minimum)
-                        * max(0, bin_count - 1)
-                    )
+                    ratio = (self._value - self._minimum) / float(self._maximum - self._minimum)
+                    played_index = int(ratio * bin_count)
+                    if played_index >= bin_count:
+                        played_index = bin_count - 1
                 buffered_index = int(max(0, bin_count - 1) * self._buffered_ratio)
 
                 for i, level in enumerate(waveform):
