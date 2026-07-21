@@ -138,3 +138,10 @@ blacklist.json
 stats.db
 
 plugins
+
+skins
+
+!skins/system
+!skins/SteamDeck
+!skins/Foxyglass
+!skins/Greylux

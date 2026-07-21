@@ -677,9 +677,6 @@ class PlayerWindow(QMainWindow):
 
         self._last_mpris_position_us = -1
 
-        #self.visualizer_window: Optional[VisualizerWindow] = None
-
-
         self.waveform_cache: dict[str, list[float]] = {}
         self.waveform_generation_indexes: set[int] = set()
 
@@ -722,7 +719,7 @@ class PlayerWindow(QMainWindow):
 
         # ── Ссылки на виджеты (совместимость с остальным кодом) ───────────
         self.NowDisplay          = self.ui["NowDisplay"]
-        self.cover_background    = self.ui["cover_background"]
+        self.cover_background    = self.ui.get("cover_background")
         self.cover_label         = self.ui["cover_label"]
         self.track_title_label   = self.ui["track_title_label"]
         self.artist_label        = self.ui["artist_label"]
@@ -756,9 +753,8 @@ class PlayerWindow(QMainWindow):
         file_menu.addAction("Exit", self.close)
         file_menu.addSeparator()
 
+        self.visualizer_window = self.ui.get("visualizer_window")
 
-
-        self.visualizer_window = self.ui.get("visualizer_window")#StarFildedWindow(audio_bar_count=164)
         if(self.visualizer_window):
             self.visualizer_window.raise_()
             self.visualizer_window.activateWindow()
@@ -767,11 +763,12 @@ class PlayerWindow(QMainWindow):
 
             self.visualizer_window.show()
 
-        self.cover_background.gradient = [(0.95, QColor(0, 0, 0, 0)), (0.6, QColor(0, 0, 0, 128))]
-        self.cover_background.setAlignment(Qt.AlignCenter)
-        self.cover_background.setScaledContents(True)
-        self.cover_background.lower()
-        self.cover_background.setGeometry(self.NowDisplay.rect())
+        if (self.cover_background):
+            self.cover_background.gradient = [(0.95, QColor(0, 0, 0, 0)), (0.6, QColor(0, 0, 0, 128))]
+            self.cover_background.setAlignment(Qt.AlignCenter)
+            self.cover_background.setScaledContents(True)
+            self.cover_background.lower()
+            self.cover_background.setGeometry(self.NowDisplay.rect())
 
         self.track_title_label.setText("No track")
         self.artist_label.setText("Unknown artist")
@@ -1476,7 +1473,8 @@ class PlayerWindow(QMainWindow):
             self.set_cover_placeholder()
 
     def set_cover_placeholder(self) -> None:
-        self.cover_background.set_new_image(QPixmap("resources/MSMPwaveBg.png"))
+        if (self.cover_background):
+            self.cover_background.set_new_image(QPixmap("resources/MSMPwaveBg.png"))
         self.cover_label.set_new_image(QPixmap("resources/MSMPwave.png"))
 
     def on_artwork_loaded(self, reply) -> None:
@@ -1824,6 +1822,9 @@ class PlayerWindow(QMainWindow):
         logging.warning("Waveform generation failed for index %s: %s", index, error)
 
     def on_audio_buffer_received(self, buffer) -> None:
+        if not(hasattr(self, 'visualizer_window')):
+            return
+
         levels = self.audio_buffer_to_levels(buffer)
         if not levels:
             return
@@ -1847,8 +1848,6 @@ class PlayerWindow(QMainWindow):
             smoothed.append(value)
             peaks.append(peak)
 
-        self.visualizer_window.levels = smoothed
-        self.visualizer_window.peaks = peaks
         if self.visualizer_window is not None:
             self.visualizer_window.set_levels(smoothed, peaks)
 
