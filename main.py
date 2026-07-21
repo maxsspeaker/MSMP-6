@@ -67,7 +67,6 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
 )
 from modules.other import GradientImageLabel,FixedComboBox,SystemMenuBar,get_ffmpeg_executable,LocalSaveDir
-from modules.discordrpcWrapper import discordrpcWrapper
 from modules.types import *
 from modules.pluginLoader import PluginLoader
 from modules.dbus import MprisServer
@@ -866,8 +865,6 @@ class PlayerWindow(QMainWindow):
         self.apply_style()
         self.setup_mpris()
 
-        self.discordrpc = discordrpcWrapper(self)
-
         self.plugin_loader.init_all(context=self)
 
         if(os.path.isfile(os.path.join(LocalSaveDir(),"autosave.plmsmpsbox"))):
@@ -1196,8 +1193,10 @@ class PlayerWindow(QMainWindow):
             return
         if self.mpris_playback_status == status:
             return
-        self.discordrpc.set_playback_status(status)
+        
+        self.events.on_play_status_changed.emit(status)
         self.mpris_playback_status = status
+
         self.emit_mpris_properties_changed("org.mpris.MediaPlayer2.Player", {
             "PlaybackStatus": status,
         })
@@ -1470,9 +1469,7 @@ class PlayerWindow(QMainWindow):
         self.artist_label.setText(item.uploader or "Unknown artist")
         self.album_label.setText(item.album or self.playlist_title or "Unknown album")
 
-        self.discordrpc.set_activity(item)
-        #if item.duration:
-        #    self.duration_label.setText(self.format_time(item.duration * 1000))
+        self.events.on_update_current_metadata.emit(item)
 
         if item.artwork_url:
             self.network.get(QNetworkRequest(QUrl(item.artwork_url)))
@@ -1567,11 +1564,10 @@ class PlayerWindow(QMainWindow):
     def set_player_position(self, position_ms: int, emit_seeked: bool = True) -> None:
         position_ms = max(0, int(position_ms))
         self.player.setPosition(position_ms)
-        self.sync_mpris_position(position_ms)
-
-        self.discordrpc.sync_position(position_ms)
+        #self.sync_mpris_position(position_ms)
 
         if emit_seeked:
+            self.events.on_sync_position.emit(position_ms)
             self.emit_mpris_seeked(position_ms)
 
     def start_mpris_position_updates(self) -> None:

@@ -13,6 +13,7 @@ import shutil
 import json
 
 class GradientImageLabel(QLabel):
+    """Супер пупер навороченое отображение картинки, спиженный с моего Minecraft лаунчера"""
     def __init__(self, parent=None,gradient:list = [],blur_effect:int = 0):
         super().__init__(parent)
         self.original_pixmap = QPixmap()
