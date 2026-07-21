@@ -1849,7 +1849,7 @@ class PlayerWindow(QMainWindow):
         logging.warning("Waveform generation failed for index %s: %s", index, error)
 
     def on_audio_buffer_received(self, buffer) -> None:
-        if not(hasattr(self, 'visualizer_window')):
+        if self.visualizer_window is None:
             return
 
         levels = self.audio_buffer_to_levels(buffer)
