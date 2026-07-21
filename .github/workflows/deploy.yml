@@ -118,10 +118,7 @@ jobs:
           Copy-Item "$env:TEMP\deno_unpack\deno.exe" "$($distRoot.FullName)\external\yt-dlp\deno.exe" -Force
 
           # FFmpeg: ready-made Windows build
-          $ffRelease = Invoke-RestMethod "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest"
-          $ffAsset = $ffRelease.assets | Where-Object { $_.name -eq "ffmpeg-master-latest-win64-gpl-shared.zip" } | Select-Object -First 1
-          if (-not $ffAsset) { throw "FFmpeg Windows asset not found" }
-          Invoke-WebRequest $ffAsset.browser_download_url -OutFile "$env:TEMP\ffmpeg.zip"
+          Invoke-WebRequest -Uri "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl-shared.zip" -OutFile "$env:TEMP\ffmpeg.zip" -UseBasicParsing
           Expand-Archive "$env:TEMP\ffmpeg.zip" -DestinationPath "$env:TEMP\ffmpeg_unpack" -Force
 
           $ffRoot = Get-ChildItem "$env:TEMP\ffmpeg_unpack" -Directory | Select-Object -First 1
