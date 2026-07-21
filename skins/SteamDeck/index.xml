@@ -57,6 +57,8 @@
         <gradientImageLabel id="cover_background"
                             visible="true" blur_effect="16" nolayout="true"/>
 
+        <systemmenubar id="MainMenuBar" visible="true"/>
+
         <!-- Строка: обложка + мета + визуализатор
              margin="16,16,16,0" → left=16 top=16 right=16 bottom=0  -->
 
@@ -67,6 +69,7 @@
 
             <gradientImageLabel id="cover_label"
                                 fixed-width="256" fixed-height="256" blur_effect="0"/>
+
 
             <!-- Мета-блок: заголовок + исполнитель + альбом, прижаты к центру -->
 

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-plmsmpsbox">
+    <comment>MSMP6 Playlist file</comment>
+    <sub-class-of type="application/json"/>
+    
+    <glob pattern="*.plmsmpsbox" weight="100"/>
+  </mime-type>
+</mime-info>

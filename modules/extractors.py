@@ -7,7 +7,7 @@ import sys,os
 import json
 import shutil
 from .types import *
-import re
+import re,time
 
 
 class ResolveSignals(QObject):
@@ -365,6 +365,9 @@ class ResolveTask(QRunnable):
                 album=data.get("album") or "",
                 artwork_url=data.get("thumbnail") or "",
             )
+            if data.get('available_at'):
+                if(data.get('available_at')-time.time()>0):
+                    time.sleep(data.get('available_at')-time.time())
             self.signals.resolved.emit(self.index, item)
         except BaseException as exc:
             error = self.format_error(exc)

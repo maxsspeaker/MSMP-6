@@ -19,13 +19,15 @@
     <!-- ═══════════════════════════════════════════════════════════════
          NowDisplay: обложка / мета / визуализатор / waveform-seekbar
          ═══════════════════════════════════════════════════════════════ -->
-    <qwidget id="NowDisplay" fixed-height="210"
+    <qwidget id="NowDisplay" fixed-height="230"
              flex="v" margin="0" spacing="0">
 
         <!-- Фоновое изображение — позиционируется вручную через resizeEvent -->
         <gradientImageLabel id="cover_background"
-                            fixed-height="210"
+                            fixed-height="230"
                             visible="false" blur_effect="16" nolayout="true"/>
+
+        <systemmenubar id="MainMenuBar" visible="true"/>
 
         <!-- Строка: обложка + мета + визуализатор
              margin="16,16,16,0" → left=16 top=16 right=16 bottom=0  -->

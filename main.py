@@ -18,6 +18,9 @@ import shutil
 import subprocess
 import tempfile
 
+if (sys.platform == "linux"):
+    os.environ["QT_AUDIO_BACKEND"] = "PulseAudio" # <--- место для конфига
+
 from dbus_next import Variant
 from PySide6.QtCore import (
     QObject,
@@ -62,45 +65,23 @@ from PySide6.QtWidgets import (
     QScroller, 
     QScrollerProperties,
     QAbstractItemView,
+    QToolTip
 )
-from modules.other import GradientImageLabel,FixedComboBox,get_ffmpeg_executable
-from modules.discordrpcWrapper import discordrpcWrapper
+from modules.other import GradientImageLabel,FixedComboBox,SystemMenuBar,get_ffmpeg_executable,LocalSaveDir
 from modules.types import *
+from modules.pluginLoader import PluginLoader
 from modules.dbus import MprisServer
 from modules.ui_engine import UIEngine
+from modules.AudioStatsDb import AudioStatsDb
+from modules.AboutWindow import AboutWindow
 from modules import extractors
 
 UIEngine.register("gradientImageLabel", GradientImageLabel)
 UIEngine.register("fixedComboBox",      FixedComboBox)
+UIEngine.register("systemmenubar",      SystemMenuBar)
 
 
 ERROR_REPORTER: Optional["ErrorReporter"] = None
-
-# CAVA-style visualizer tuning
-VISUALIZER_BAR_GAP = 2.0
-VISUALIZER_LEFT_MARGIN = 0
-VISUALIZER_RIGHT_MARGIN = 0
-VISUALIZER_TOP_MARGIN = 12
-VISUALIZER_BOTTOM_MARGIN = 12
-VISUALIZER_MIN_BAR_HEIGHT = 1
-
-VISUALIZER_GAIN = 1.0
-VISUALIZER_ATTACK = 0.42
-VISUALIZER_DECAY = 0.020
-VISUALIZER_PEAK_DECAY = 0.010
-VISUALIZER_MIN_VISIBLE_LEVEL = 0.012
-
-#VISUALIZER_WINDOW_WIDTH = 250
-#VISUALIZER_WINDOW_HEIGHT = 128
-VISUALIZER_BACKGROUND_COLOR = "#000000"
-VISUALIZER_TRACK_COLOR = "#00000000"
-VISUALIZER_BAR_COLOR_LOW = "#7CFF6B"
-VISUALIZER_BAR_COLOR_MID = "#D7FF4A"
-VISUALIZER_BAR_COLOR_HIGH = "#FFB347"
-VISUALIZER_BAR_COLOR_PEAK = "#FF5D5D"
-VISUALIZER_BAR_OUTLINE = "#00000000"
-VISUALIZER_PEAK_HEIGHT = 3.0
-VISUALIZER_CORNER_RADIUS = 3
 
 WAVEFORM_BIN_COUNT = 440
 WAVEFORM_BACKGROUND_COLOR = "#00000000"
@@ -136,6 +117,32 @@ class ErrorReporter(QObject):
         box.setDetailedText(details)
         box.exec()
 
+
+# CAVA-style visualizer tuning
+VISUALIZER_BAR_GAP = 2.0
+VISUALIZER_LEFT_MARGIN = 0
+VISUALIZER_RIGHT_MARGIN = 0
+VISUALIZER_TOP_MARGIN = 12
+VISUALIZER_BOTTOM_MARGIN = 12
+VISUALIZER_MIN_BAR_HEIGHT = 1
+
+VISUALIZER_GAIN = 1.0
+VISUALIZER_ATTACK = 0.42
+VISUALIZER_DECAY = 0.020
+VISUALIZER_PEAK_DECAY = 0.010
+VISUALIZER_MIN_VISIBLE_LEVEL = 0.012
+
+#VISUALIZER_WINDOW_WIDTH = 250
+#VISUALIZER_WINDOW_HEIGHT = 128
+VISUALIZER_BACKGROUND_COLOR = "#000000"
+VISUALIZER_TRACK_COLOR = "#00000000"
+VISUALIZER_BAR_COLOR_LOW = "#7CFF6B"
+VISUALIZER_BAR_COLOR_MID = "#D7FF4A"
+VISUALIZER_BAR_COLOR_HIGH = "#FFB347"
+VISUALIZER_BAR_COLOR_PEAK = "#FF5D5D"
+VISUALIZER_BAR_OUTLINE = "#00000000"
+VISUALIZER_PEAK_HEIGHT = 3.0
+VISUALIZER_CORNER_RADIUS = 3
 
 class VisualizerWindow(QWidget):
     def __init__(self,parent=None,audio_bar_count:int = 58) -> None:
@@ -354,6 +361,17 @@ class WaveformSeekBar(QWidget):
         ratio = (self._clamp(value) - self._minimum) / float(self._maximum - self._minimum)
         return 12.0 + ratio * usable
 
+    def _format_ms(self, ms: int) -> str:
+        seconds = max(0, ms // 1000)
+        minutes, seconds = divmod(seconds, 60)
+        hours, minutes = divmod(minutes, 60)
+        if hours:
+            return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+        return f"{minutes}:{seconds:02d}"
+
+    def _show_seek_tooltip(self, value: int, global_pos) -> None:
+        QToolTip.showText(global_pos, self._format_ms(value), self)
+
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:
             self._dragging = True
@@ -361,6 +379,7 @@ class WaveformSeekBar(QWidget):
             value = self._value_from_x(event.position().x())
             self.setValue(value)
             self.sliderMoved.emit(value)
+            self._show_seek_tooltip(value, event.globalPosition().toPoint())
             event.accept()
             return
         super().mousePressEvent(event)
@@ -370,6 +389,7 @@ class WaveformSeekBar(QWidget):
             value = self._value_from_x(event.position().x())
             self.setValue(value)
             self.sliderMoved.emit(value)
+            self._show_seek_tooltip(value, event.globalPosition().toPoint())
             event.accept()
             return
         super().mouseMoveEvent(event)
@@ -381,6 +401,7 @@ class WaveformSeekBar(QWidget):
             self.sliderMoved.emit(value)
             self._dragging = False
             self.sliderReleased.emit()
+            QToolTip.hideText()
             event.accept()
             return
         super().mouseReleaseEvent(event)
@@ -414,11 +435,10 @@ class WaveformSeekBar(QWidget):
                 bin_width = max(1.0, inner.width() / float(bin_count))
                 played_index = 0
                 if self._maximum > self._minimum:
-                    played_index = int(
-                        (self._value - self._minimum)
-                        / float(self._maximum - self._minimum)
-                        * max(0, bin_count - 1)
-                    )
+                    ratio = (self._value - self._minimum) / float(self._maximum - self._minimum)
+                    played_index = int(ratio * bin_count)
+                    if played_index >= bin_count:
+                        played_index = bin_count - 1
                 buffered_index = int(max(0, bin_count - 1) * self._buffered_ratio)
 
                 for i, level in enumerate(waveform):
@@ -632,6 +652,12 @@ class PlayerWindow(QMainWindow):
         self.setWindowIcon(QIcon("resources/MSMPicon.png"))
 
         self.SkinName=skin
+        self.events = PlayerEvents()
+
+        self.db=AudioStatsDb(db_name=os.path.join(LocalSaveDir(),"music.db"))
+
+        self.plugin_loader = PluginLoader()
+        self.plugin_loader.load_all(context=self)
 
         self.playlist: list[PlaylistItem] = []
         self.current_index: Optional[int] = None
@@ -644,6 +670,7 @@ class PlayerWindow(QMainWindow):
         self.error_boxes: list[QMessageBox] = []
         self.playlist_title = "MSMP5 Playlist"
         self.playlist_image_url = "https://msmp.maxsspeaker.space/static/img/Missing.png"
+
         self.mpris_server = MprisServer()
         self.mpris_playback_status = "Stopped"
         self.mpris_position_timer = QTimer(self)
@@ -651,30 +678,26 @@ class PlayerWindow(QMainWindow):
         self.mpris_position_timer.setTimerType(Qt.PreciseTimer)
         self.mpris_position_timer.timeout.connect(self.sync_mpris_position)
 
-        self._last_mpris_position_us = -1
-
-        #self.visualizer_window: Optional[VisualizerWindow] = None
-
-        #self.visualizer_window = VisualizerWindow()
-        #self.visualizer_window.hide()
-        #self.visualizer_window.raise_()
-        #self.visualizer_window.activateWindow()
-        #self.visualizer_window.setFixedSize(233,128)
-
-        self.waveform_cache: dict[str, list[float]] = {}
-        self.waveform_generation_indexes: set[int] = set()
-
         self.thread_pool = QThreadPool.globalInstance()
+        
         self.resolve_signals = extractors.ResolveSignals()
         self.resolve_signals.resolved.connect(self.on_resolved)
         self.resolve_signals.failed.connect(self.on_resolve_failed)
+
         self.jam_signals = extractors.JamPlaylistSignals()
         self.jam_signals.parsed.connect(self.on_jam_playlist_parsed)
         self.jam_signals.status.connect(self.on_jam_playlist_status)
         self.jam_signals.failed.connect(self.on_jam_playlist_failed)
+
+        self._last_mpris_position_us = -1
+
+        self.waveform_cache: dict[str, list[float]] = {}
+        self.waveform_generation_indexes: set[int] = set()
+
         self.waveform_signals = WaveformSignals()
         self.waveform_signals.generated.connect(self.on_waveform_generated)
         self.waveform_signals.failed.connect(self.on_waveform_failed)
+
         self.network = QNetworkAccessManager(self)
         self.network.finished.connect(self.on_artwork_loaded)
 
@@ -684,7 +707,6 @@ class PlayerWindow(QMainWindow):
         self.player.setAudioOutput(self.audio_output)
         self.player.setAudioBufferOutput(self.audio_buffer_output)
         self.audio_output.setVolume(0.8)
-        self.audio_buffer_output.audioBufferReceived.connect(self.on_audio_buffer_received)
 
         self.player.positionChanged.connect(self.on_position_changed)
         self.player.durationChanged.connect(self.on_duration_changed)
@@ -711,7 +733,7 @@ class PlayerWindow(QMainWindow):
 
         # ── Ссылки на виджеты (совместимость с остальным кодом) ───────────
         self.NowDisplay          = self.ui["NowDisplay"]
-        self.cover_background    = self.ui["cover_background"]
+        self.cover_background    = self.ui.get("cover_background")
         self.cover_label         = self.ui["cover_label"]
         self.track_title_label   = self.ui["track_title_label"]
         self.artist_label        = self.ui["artist_label"]
@@ -735,19 +757,36 @@ class PlayerWindow(QMainWindow):
         self.mode_button         = self.ui["mode_button"]
         self.playlistBox         = self.ui["playlistBox"]
         self.table               = self.ui["table"]
+        self.MainMenuBar         = self.ui["MainMenuBar"]
 
-        # ── cover_background: создаётся вручную (нестандартные аргументы) ─
 
-        self.cover_background.gradient = [(0.95, QColor(0, 0, 0, 0)), (0.6, QColor(0, 0, 0, 128))]
-        self.cover_background.setAlignment(Qt.AlignCenter)
-        self.cover_background.setScaledContents(True)
-        self.cover_background.lower()
-        self.cover_background.setGeometry(self.NowDisplay.rect())
+        file_menu = self.MainMenuBar.add_menu("Menu")
+        file_menu.addAction("About",lambda:AboutWindow(self).exec())
+        self.PlguinMenu=self.MainMenuBar.add_submenu(file_menu, "Plugins")
+        file_menu.addSeparator()
+        file_menu.addAction("Exit", self.close)
+        file_menu.addSeparator()
+
+        self.visualizer_window = self.ui.get("visualizer_window")
+
+        if(self.visualizer_window):
+            self.visualizer_window.raise_()
+            self.visualizer_window.activateWindow()
+
+            self.audio_buffer_output.audioBufferReceived.connect(self.on_audio_buffer_received)
+
+            self.visualizer_window.show()
+
+        if (self.cover_background):
+            self.cover_background.gradient = [(0.95, QColor(0, 0, 0, 0)), (0.6, QColor(0, 0, 0, 128))]
+            self.cover_background.setAlignment(Qt.AlignCenter)
+            self.cover_background.setScaledContents(True)
+            self.cover_background.lower()
+            self.cover_background.setGeometry(self.NowDisplay.rect())
 
         self.track_title_label.setText("No track")
         self.artist_label.setText("Unknown artist")
         self.album_label.setText("Unknown album")
-
 
         # ── Донастройка cover_label ────────────────────────────────────────
         self.cover_label.setAlignment(Qt.AlignCenter)
@@ -775,7 +814,8 @@ class PlayerWindow(QMainWindow):
             (self.next_button,    "resources/next.svg"),
             (self.restart_button, "resources/reload-audio.svg"),
         ):
-            btn.setIcon(QIcon(icon_file))
+            if(btn):
+                btn.setIcon(QIcon(icon_file))
 
         self.mode_button.setIcon(QIcon(self.PLAY_MODES_icons[self.play_mode_index]))
 
@@ -793,8 +833,11 @@ class PlayerWindow(QMainWindow):
         )
 
         # ── Донастройка seek bar ──────────────────────────────────────────
-        self.position_slider.setRange(0, 0)
-        self.position_slider.set_buffered_ratio(0.0)
+
+        if isinstance(self.position_slider, WaveformSeekBar):
+            self.position_slider.setRange(0, 0)
+            self.position_slider.set_buffered_ratio(0.0)
+
         self.position_slider.sliderPressed.connect(self.on_seek_start)
         self.position_slider.sliderReleased.connect(self.on_seek_end)
         self.position_slider.sliderMoved.connect(self.on_seek_preview)
@@ -831,20 +874,15 @@ class PlayerWindow(QMainWindow):
         sp.setVerticalPolicy(QSizePolicy.Policy.Ignored)
         self.playlistBox.setSizePolicy(sp)
 
-        # ── visualizer_window уже создан движком, инициализируем данные ───
-        self.visualizer_window = self.ui["visualizer_window"]
-        self.visualizer_levels = [0.0] * self.visualizer_window.audio_bar_count
-        self.visualizer_peaks = [0.0] * self.visualizer_window.audio_bar_count
-
-        self.visualizer_window.set_levels(self.visualizer_levels, self.visualizer_peaks)
-        #self.visualizer_window.setFixedSize(533,328)
-        self.visualizer_window.activateWindow()
 
         self.setCentralWidget(container)
         self.apply_style()
         self.setup_mpris()
 
-        self.discordrpc = discordrpcWrapper(self)
+        self.plugin_loader.init_all(context=self)
+
+        if(os.path.isfile(os.path.join(LocalSaveDir(),"autosave.plmsmpsbox"))):
+            self.load_playlist(path=os.path.join(LocalSaveDir(),"autosave.plmsmpsbox"),isautosave=True)
 
 
     def eventFilter(self, obj, event):
@@ -1137,6 +1175,8 @@ class PlayerWindow(QMainWindow):
             return
 
         if self.current_index is not None:
+            if(self.db):
+                self.db.increment_plays(self.playlist[self.current_index])
             self.player.play()
             self.start_mpris_position_updates()
             self.sync_mpris_position()
@@ -1144,10 +1184,13 @@ class PlayerWindow(QMainWindow):
         elif self.playlist:
             self.play_index(0)
 
+        self.events.on_playback_started.emit()
+
     def pause_playback(self) -> None:
         self.player.pause()
         self.sync_mpris_position()
         self.set_mpris_playback_status("Paused")
+        self.events.on_playback_paused.emit()
 
     def stop_playback(self) -> None:
         self.stop_mpris_position_updates()
@@ -1157,20 +1200,20 @@ class PlayerWindow(QMainWindow):
         self.update_buffer_progress(0.0)
         self.set_mpris_playback_status("Stopped")
         self.update_mpris_player_properties({"Position": 0})
+        self.events.on_playback_stopped.emit()
 
     def set_mpris_playback_status(self, status: str) -> None:
         if status not in {"Playing", "Paused", "Stopped"}:
             return
         if self.mpris_playback_status == status:
             return
-        self.discordrpc.set_playback_status(status)
+        
+        self.events.on_play_status_changed.emit(status)
         self.mpris_playback_status = status
+
         self.emit_mpris_properties_changed("org.mpris.MediaPlayer2.Player", {
             "PlaybackStatus": status,
         })
-
-    def on_visualizer_closed(self, _obj=None) -> None:
-        self.visualizer_window = None
 
     def play_index(self, index: int) -> None:
         if index < 0 or index >= len(self.playlist):
@@ -1196,7 +1239,8 @@ class PlayerWindow(QMainWindow):
         self.update_current_metadata(item)
 
         self._last_mpris_position_us = -1
-        self.position_slider.set_waveform(item.waveform)
+        if isinstance(self.position_slider, WaveformSeekBar):
+            self.position_slider.set_waveform(item.waveform)
         self.update_buffer_progress(0.0)
         self.player.setSource(QUrl(item.stream_url))
         self.player.play()
@@ -1221,6 +1265,10 @@ class PlayerWindow(QMainWindow):
                 600,
                 lambda pos=restored_position: self.set_player_position(pos, emit_seeked=False),
             )
+        else:
+            self.events.on_start_playback.emit(index)
+            if(self.db):
+                self.db.increment_plays(item)
 
     def play_next(self) -> None:
         if not self.playlist:
@@ -1283,12 +1331,14 @@ class PlayerWindow(QMainWindow):
         self.table.setRowCount(0)
         self.position_slider.setRange(0, 0)
         self.time_label.setText("0:00 / 0:00")
-        #self.duration_label.setText("0:00")
         self.track_title_label.setText("No track")
         self.artist_label.setText("Unknown artist")
         self.album_label.setText("Unknown album")
         self.set_cover_placeholder()
-        self.position_slider.set_waveform([])
+
+        if isinstance(self.position_slider, WaveformSeekBar):
+            self.position_slider.set_waveform([])
+
         self.update_buffer_progress(0.0)
         self.status_label.setText("Playlist cleared")
         self.emit_mpris_properties_changed("org.mpris.MediaPlayer2.Player", {
@@ -1329,18 +1379,20 @@ class PlayerWindow(QMainWindow):
             with open(path, "w", encoding="utf-8") as file:
                 json.dump(data, file, ensure_ascii=False, indent=2)
             self.status_label.setText(f"Playlist saved: {path}")
+            self.events.on_playlist_saved.emit(path,self.playlist)
         except OSError as exc:
             QMessageBox.warning(self, "Save failed", str(exc))
 
-    def load_playlist(self) -> None:
-        path, _filter = QFileDialog.getOpenFileName(
-            self,
-            "Load playlist",
-            os.path.expanduser("~")+"/.config/MSMP-Stream/5.0/MyPlaylists/",
-            "MSMP playlist (*.plmsmpsbox);;JSON playlists (*.json);;All files (*)",
-        )
-        if not path:
-            return
+    def load_playlist(self,path=None,isautosave=False) -> None:
+        if not(path):
+            path, _filter = QFileDialog.getOpenFileName(
+                self,
+                "Load playlist",
+                os.path.expanduser("~")+"/.config/MSMP-Stream/5.0/MyPlaylists/",
+                "MSMP playlist (*.plmsmpsbox);;JSON playlists (*.json);;All files (*)",
+            )
+            if not path:
+                return
 
         try:
             with open(path, "r", encoding="utf-8") as file:
@@ -1357,6 +1409,14 @@ class PlayerWindow(QMainWindow):
                 "CanGoPrevious": bool(self.playlist),
                 "CanPlay": bool(self.playlist),
             })
+            if(isautosave):
+                QTimer.singleShot(0, lambda: self.table.verticalScrollBar().setValue(data["ScrollBarState"]))
+
+                #self.resolve_item(index, auto_play=True)
+            else:
+                QTimer.singleShot(0, lambda: self.table.verticalScrollBar().setValue(0))
+            self.events.on_playlist_opened.emit(path,self.playlist)
+
         except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
             QMessageBox.warning(self, "Load failed", str(exc))
 
@@ -1426,9 +1486,7 @@ class PlayerWindow(QMainWindow):
         self.artist_label.setText(item.uploader or "Unknown artist")
         self.album_label.setText(item.album or self.playlist_title or "Unknown album")
 
-        self.discordrpc.set_activity(item)
-        #if item.duration:
-        #    self.duration_label.setText(self.format_time(item.duration * 1000))
+        self.events.on_update_current_metadata.emit(item)
 
         if item.artwork_url:
             self.network.get(QNetworkRequest(QUrl(item.artwork_url)))
@@ -1436,7 +1494,8 @@ class PlayerWindow(QMainWindow):
             self.set_cover_placeholder()
 
     def set_cover_placeholder(self) -> None:
-        self.cover_background.set_new_image(QPixmap("resources/MSMPwaveBg.png"))
+        if (self.cover_background):
+            self.cover_background.set_new_image(QPixmap("resources/MSMPwaveBg.png"))
         self.cover_label.set_new_image(QPixmap("resources/MSMPwave.png"))
 
     def on_artwork_loaded(self, reply) -> None:
@@ -1523,11 +1582,10 @@ class PlayerWindow(QMainWindow):
     def set_player_position(self, position_ms: int, emit_seeked: bool = True) -> None:
         position_ms = max(0, int(position_ms))
         self.player.setPosition(position_ms)
-        self.sync_mpris_position(position_ms)
-
-        self.discordrpc.sync_position(position_ms)
+        #self.sync_mpris_position(position_ms)
 
         if emit_seeked:
+            self.events.on_sync_position.emit(position_ms)
             self.emit_mpris_seeked(position_ms)
 
     def start_mpris_position_updates(self) -> None:
@@ -1623,7 +1681,7 @@ class PlayerWindow(QMainWindow):
             return 0
         return None
 
-    def on_media_status_changed(self, status: QMediaPlayer.MediaStatus) -> None:
+    def on_media_status_changed(self, status: QMediaPlayer.MediaStatus) -> None: 
         loading_states = {
             QMediaPlayer.LoadingMedia,
             QMediaPlayer.BufferingMedia,
@@ -1711,6 +1769,9 @@ class PlayerWindow(QMainWindow):
             return 0.0
 
     def update_buffer_progress(self, progress: float) -> None:
+        if not isinstance(self.position_slider, WaveformSeekBar):
+            return
+            
         progress = max(0.0, min(1.0, float(progress)))
         if(progress==0.25):
             return
@@ -1734,6 +1795,9 @@ class PlayerWindow(QMainWindow):
         self.update_buffer_progress(progress)
 
     def request_waveform_generation(self, index: int) -> None:
+        if not isinstance(self.position_slider, WaveformSeekBar):
+            return
+
         if index < 0 or index >= len(self.playlist):
             return
 
@@ -1785,6 +1849,9 @@ class PlayerWindow(QMainWindow):
         logging.warning("Waveform generation failed for index %s: %s", index, error)
 
     def on_audio_buffer_received(self, buffer) -> None:
+        if self.visualizer_window is None:
+            return
+
         levels = self.audio_buffer_to_levels(buffer)
         if not levels:
             return
@@ -1792,7 +1859,7 @@ class PlayerWindow(QMainWindow):
         smoothed: list[float] = []
         peaks: list[float] = []
 
-        for previous, previous_peak, level in zip(self.visualizer_levels, self.visualizer_peaks, levels):
+        for previous, previous_peak, level in zip(self.visualizer_window.levels, self.visualizer_window.peaks, levels):
             level = min(1.0, max(0.0, level * VISUALIZER_GAIN))
 
             if level >= previous:
@@ -1808,8 +1875,6 @@ class PlayerWindow(QMainWindow):
             smoothed.append(value)
             peaks.append(peak)
 
-        self.visualizer_levels = smoothed
-        self.visualizer_peaks = peaks
         if self.visualizer_window is not None:
             self.visualizer_window.set_levels(smoothed, peaks)
 
@@ -1869,7 +1934,6 @@ class PlayerWindow(QMainWindow):
         if not self.user_dragging:
             self.position_slider.setValue(position)
         self.update_time_label(position, self.player.duration())
-        self.sync_mpris_position(position)
 
     def on_duration_changed(self, duration: int) -> None:
         self.position_slider.setRange(0, max(0, duration))
@@ -1897,7 +1961,6 @@ class PlayerWindow(QMainWindow):
         self.emit_mpris_properties_changed("org.mpris.MediaPlayer2.Player", {
             "Volume": value / 100,
         })
-
     def on_volume_slider_changed(self, value: int) -> None:
         """Слот для volume_slider из XML (connect=). Делегирует в оба получателя."""
         self.audio_output.setVolume(value / 100)
@@ -1908,6 +1971,19 @@ class PlayerWindow(QMainWindow):
             self.setStyleSheet(f.read())
 
     def closeEvent(self, event) -> None:
+        if(self.db):
+            self.db.close()
+
+        self.events.on_app_closing.emit()
+
+        data = self.to_msmp_playlist()
+        data["ScrollBarState"]=self.table.verticalScrollBar().value()
+        try:
+            with open(os.path.join(LocalSaveDir(),"autosave.plmsmpsbox"), "w", encoding="utf-8") as file:
+                json.dump(data, file, ensure_ascii=False, indent=2)
+        except OSError as exc:
+            pass
+
         self.mpris_server.stop()
         super().closeEvent(event)
 
@@ -1978,7 +2054,7 @@ def excepthook(exc_type, exc_value, exc_tb):
 
 def main() -> int:
 
-    parser = argparse.ArgumentParser(description="PySide6 Fullscreen App")
+    parser = argparse.ArgumentParser(description="MSMP FoxWave media player")
     parser.add_argument(
         '-f', '--fullscreen', 
         action='store_true', 
