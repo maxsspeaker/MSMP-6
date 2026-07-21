@@ -50,7 +50,7 @@ class AboutWindow(QtWidgets.QDialog):
             }
         """)
         Textlayout = QtWidgets.QVBoxLayout()
-        self.label = QtWidgets.QLabel(f"""MSMP FoxWave v6.0.2-alpha night build
+        self.label = QtWidgets.QLabel(f"""MSMP FoxWave v6.0.2-alpha
 
 Легковесный стриминговый плеер использущий pyside6 и yt-dlp
 
