@@ -5,6 +5,7 @@ import importlib
 import inspect
 
 from modules.types import PluginBase 
+from modules.other import LocalSaveDir
 
 class PluginLoader:
     def __init__(self, plugins_dir_name="plugins"):
@@ -31,8 +32,19 @@ class PluginLoader:
 
     def load_all(self, context):
         if not os.path.exists(self.plugins_dir):
-            os.makedirs(self.plugins_dir)
-            return
+            try:
+                os.makedirs(self.plugins_dir)
+                return
+            except PermissionError:
+                self.plugins_dir=os.path.join(LocalSaveDir(),"plugins")
+
+            try:
+                if not os.path.exists(self.plugins_dir):
+                    os.makedirs(self.plugins_dir)
+                    return
+            except PermissionError:
+                return
+            
 
         for item in os.listdir(self.plugins_dir):
             item_path = os.path.join(self.plugins_dir, item)
