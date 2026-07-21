@@ -1,6 +1,6 @@
 ![MSMP FoxWave](Logos/MSMPiconWave2Global.png)
 
-
+Discord сервер: https://discord.gg/u3dRdUZr6f
 
 PySide6-аудиоплеер, который получает аудиопотоки через `yt-dlp`.
 
