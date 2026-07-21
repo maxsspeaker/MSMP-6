@@ -65,6 +65,7 @@ from PySide6.QtWidgets import (
     QScroller, 
     QScrollerProperties,
     QAbstractItemView,
+    QToolTip
 )
 from modules.other import GradientImageLabel,FixedComboBox,SystemMenuBar,get_ffmpeg_executable,LocalSaveDir
 from modules.types import *
@@ -360,6 +361,17 @@ class WaveformSeekBar(QWidget):
         ratio = (self._clamp(value) - self._minimum) / float(self._maximum - self._minimum)
         return 12.0 + ratio * usable
 
+    def _format_ms(self, ms: int) -> str:
+        seconds = max(0, ms // 1000)
+        minutes, seconds = divmod(seconds, 60)
+        hours, minutes = divmod(minutes, 60)
+        if hours:
+            return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+        return f"{minutes}:{seconds:02d}"
+
+    def _show_seek_tooltip(self, value: int, global_pos) -> None:
+        QToolTip.showText(global_pos, self._format_ms(value), self)
+
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:
             self._dragging = True
@@ -367,6 +379,7 @@ class WaveformSeekBar(QWidget):
             value = self._value_from_x(event.position().x())
             self.setValue(value)
             self.sliderMoved.emit(value)
+            self._show_seek_tooltip(value, event.globalPosition().toPoint())
             event.accept()
             return
         super().mousePressEvent(event)
@@ -376,6 +389,7 @@ class WaveformSeekBar(QWidget):
             value = self._value_from_x(event.position().x())
             self.setValue(value)
             self.sliderMoved.emit(value)
+            self._show_seek_tooltip(value, event.globalPosition().toPoint())
             event.accept()
             return
         super().mouseMoveEvent(event)
@@ -387,6 +401,7 @@ class WaveformSeekBar(QWidget):
             self.sliderMoved.emit(value)
             self._dragging = False
             self.sliderReleased.emit()
+            QToolTip.hideText()
             event.accept()
             return
         super().mouseReleaseEvent(event)
@@ -818,8 +833,11 @@ class PlayerWindow(QMainWindow):
         )
 
         # ── Донастройка seek bar ──────────────────────────────────────────
-        self.position_slider.setRange(0, 0)
-        self.position_slider.set_buffered_ratio(0.0)
+
+        if isinstance(self.position_slider, WaveformSeekBar):
+            self.position_slider.setRange(0, 0)
+            self.position_slider.set_buffered_ratio(0.0)
+
         self.position_slider.sliderPressed.connect(self.on_seek_start)
         self.position_slider.sliderReleased.connect(self.on_seek_end)
         self.position_slider.sliderMoved.connect(self.on_seek_preview)
@@ -1221,7 +1239,8 @@ class PlayerWindow(QMainWindow):
         self.update_current_metadata(item)
 
         self._last_mpris_position_us = -1
-        self.position_slider.set_waveform(item.waveform)
+        if isinstance(self.position_slider, WaveformSeekBar):
+            self.position_slider.set_waveform(item.waveform)
         self.update_buffer_progress(0.0)
         self.player.setSource(QUrl(item.stream_url))
         self.player.play()
@@ -1316,7 +1335,10 @@ class PlayerWindow(QMainWindow):
         self.artist_label.setText("Unknown artist")
         self.album_label.setText("Unknown album")
         self.set_cover_placeholder()
-        self.position_slider.set_waveform([])
+
+        if isinstance(self.position_slider, WaveformSeekBar):
+            self.position_slider.set_waveform([])
+
         self.update_buffer_progress(0.0)
         self.status_label.setText("Playlist cleared")
         self.emit_mpris_properties_changed("org.mpris.MediaPlayer2.Player", {
@@ -1747,6 +1769,9 @@ class PlayerWindow(QMainWindow):
             return 0.0
 
     def update_buffer_progress(self, progress: float) -> None:
+        if not isinstance(self.position_slider, WaveformSeekBar):
+            return
+            
         progress = max(0.0, min(1.0, float(progress)))
         if(progress==0.25):
             return
@@ -1770,6 +1795,9 @@ class PlayerWindow(QMainWindow):
         self.update_buffer_progress(progress)
 
     def request_waveform_generation(self, index: int) -> None:
+        if not isinstance(self.position_slider, WaveformSeekBar):
+            return
+
         if index < 0 or index >= len(self.playlist):
             return
 
