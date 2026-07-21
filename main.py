@@ -1316,7 +1316,6 @@ class PlayerWindow(QMainWindow):
         self.table.setRowCount(0)
         self.position_slider.setRange(0, 0)
         self.time_label.setText("0:00 / 0:00")
-        #self.duration_label.setText("0:00")
         self.track_title_label.setText("No track")
         self.artist_label.setText("Unknown artist")
         self.album_label.setText("Unknown album")
@@ -1832,7 +1831,7 @@ class PlayerWindow(QMainWindow):
         smoothed: list[float] = []
         peaks: list[float] = []
 
-        for previous, previous_peak, level in zip(self.visualizer_levels, self.visualizer_peaks, levels):
+        for previous, previous_peak, level in zip(self.visualizer_window.levels, self.visualizer_window.peaks, levels):
             level = min(1.0, max(0.0, level * VISUALIZER_GAIN))
 
             if level >= previous:
@@ -1848,8 +1847,8 @@ class PlayerWindow(QMainWindow):
             smoothed.append(value)
             peaks.append(peak)
 
-        self.visualizer_levels = smoothed
-        self.visualizer_peaks = peaks
+        self.visualizer_window.levels = smoothed
+        self.visualizer_window.peaks = peaks
         if self.visualizer_window is not None:
             self.visualizer_window.set_levels(smoothed, peaks)
 
