@@ -389,6 +389,8 @@ class ResolveTask(QRunnable):
             )
         if not message:
             message = exc.__class__.__name__
+        elif(message=="argument of type 'bool' is not iterable"):
+            message = "Скачайте плагин для поддержки источника"
         return message
 
     @staticmethod

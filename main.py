@@ -917,16 +917,20 @@ class PlayerWindow(QMainWindow):
         elif(parsed["type"]=="video"):
             self.add_url_value(url)
         else:
-            self.add_url_value(url)
-
-        print(parsed)
+            type,source_id=self.plugin_loader.Source_resolver(url)
+            if(type==None):
+                self.add_url_value(url)
+            elif(type=="audio"):
+                self.add_url_value(url,source_id=source_id)
+            else:
+                self.parse_jam_playlist(url=url,source_id=source_id)
 
         self.url_input.clear()
 
 
-    def add_url_value(self, url: str, auto_play: bool = False) -> None:
+    def add_url_value(self, url: str, auto_play: bool = False,source_id="youtube") -> None:
         row = len(self.playlist)
-        self.playlist.append(PlaylistItem(page_url=url))
+        self.playlist.append(PlaylistItem(page_url=url,source_id=source_id))
         self.table.insertRow(row)
         self.set_row(row, self.playlist[row])
         self.status_label.setText("Resolving stream...")
@@ -946,9 +950,9 @@ class PlayerWindow(QMainWindow):
 
         self.resolving_indexes.add(index)
         self.resolve_autoplay[index] = auto_play
-        task = extractors.ResolveTask(
+        task = self.plugin_loader.find_resolver(
             index,
-            self.playlist[index].page_url,
+            self.playlist[index],
             self.resolve_signals,
             self.cookie_browser.currentData() or "",
         )
@@ -956,7 +960,7 @@ class PlayerWindow(QMainWindow):
         self.thread_pool.start(task)
 
 
-    def parse_jam_playlist(self, index: Optional[int]=None,url: Optional[str] = None) -> None:
+    def parse_jam_playlist(self, index: Optional[int]=None,url: Optional[str] = None,source_id="youtube") -> None:
         if not(index==None):
             if index < 0 or index >= len(self.playlist):
                 return
@@ -969,12 +973,12 @@ class PlayerWindow(QMainWindow):
             self.status_label.setText("Parsing playlist...")  
             JamPlaylist=False
 
-        task = extractors.JamPlaylistTask(
+        task = self.plugin_loader.findPL_resolver(
             index,
             url,
             self.jam_signals,
             self.cookie_browser.currentData() or "",
-            JamPlaylist=JamPlaylist
+            JamPlaylist=JamPlaylist,source_id=source_id
         )
         task.setAutoDelete(True)
         self.thread_pool.start(task)
@@ -1368,7 +1372,7 @@ class PlayerWindow(QMainWindow):
         path, _filter = QFileDialog.getSaveFileName(
             self,
             "Save playlist",
-            os.path.expanduser("~")+f"/.config/MSMP-Stream/5.0/MyPlaylists/{self.playlist_title}.plmsmpsbox",
+            os.path.join(LocalSaveDir(),"MyPlaylists",f"{self.playlist_title}.plmsmpsbox"),
             "MSMP playlist (*.plmsmpsbox);;JSON playlists (*.json)"
         )
         if not path:
@@ -1388,7 +1392,7 @@ class PlayerWindow(QMainWindow):
             path, _filter = QFileDialog.getOpenFileName(
                 self,
                 "Load playlist",
-                os.path.expanduser("~")+"/.config/MSMP-Stream/5.0/MyPlaylists/",
+                os.path.join(LocalSaveDir(),"MyPlaylists",""),
                 "MSMP playlist (*.plmsmpsbox);;JSON playlists (*.json);;All files (*)",
             )
             if not path:
@@ -1411,8 +1415,6 @@ class PlayerWindow(QMainWindow):
             })
             if(isautosave):
                 QTimer.singleShot(0, lambda: self.table.verticalScrollBar().setValue(data["ScrollBarState"]))
-
-                #self.resolve_item(index, auto_play=True)
             else:
                 QTimer.singleShot(0, lambda: self.table.verticalScrollBar().setValue(0))
             self.events.on_playlist_opened.emit(path,self.playlist)

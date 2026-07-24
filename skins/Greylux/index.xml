@@ -14,7 +14,11 @@
 -->
 
 <!-- Корневой контейнер: VBox без отступов, нулевой spacing -->
-<qwidget flex="v" margin="0" spacing="0">
+<qwidget flex="v" margin="0" spacing="0"
+         meta-name="Greylux"
+         meta-author="Maxsspeaker"
+         meta-version="6.0.1"
+         meta-description="Современный вариант MSMP FoxWave">
 
     <!-- ═══════════════════════════════════════════════════════════════
          NowDisplay: обложка / мета / визуализатор / waveform-seekbar

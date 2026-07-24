@@ -14,7 +14,11 @@
 -->
 
 <!-- Корневой контейнер: VBox без отступов, нулевой spacing -->
-<qwidget flex="v" margin="0" spacing="0">
+<qwidget flex="v" margin="0" spacing="0"
+         meta-name="Foxyglass"
+         meta-author="Maxsspeaker"
+         meta-version="6.0.2"
+         meta-description="Классический тёмный MSMP FoxWave скин">
 
     <!-- ═══════════════════════════════════════════════════════════════
          NowDisplay: обложка / мета / визуализатор / waveform-seekbar

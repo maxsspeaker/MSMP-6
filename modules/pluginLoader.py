@@ -3,9 +3,11 @@ import sys
 import os,traceback
 import importlib
 import inspect
+import re
 
-from modules.types import PluginBase 
+from modules.types import PluginBase,PlaylistItem
 from modules.other import LocalSaveDir
+from modules import extractors 
 
 class PluginLoader:
     def __init__(self, plugins_dir_name="plugins"):
@@ -16,19 +18,20 @@ class PluginLoader:
         self.plugins_dir_name = plugins_dir_name
         self.plugins_dir = os.path.join(self.base_dir, plugins_dir_name)
         self.loaded_plugins = []
+        self.extractor_plugins = []
 
         if self.base_dir not in sys.path:
             sys.path.insert(0, self.base_dir)
 
     def init_all(self, context):
-        try:
-            for plugin_instance in self.loaded_plugins:
+        for plugin_instance in self.loaded_plugins:
                 if(hasattr(plugin_instance, 'init_plugin')):
-                    plugin_instance.init_plugin()
+                    try:
+                        plugin_instance.init_plugin()
+                    except Exception as e:
+                        details = traceback.format_exc()
+                        print(f"Ошибка иницизилации: {details}")
 
-        except Exception as e:
-            details = traceback.format_exc()
-            print(f"Ошибка иницизилации: {details}")
 
     def load_all(self, context):
         if not os.path.exists(self.plugins_dir):
@@ -72,6 +75,9 @@ class PluginLoader:
                     plugin_instance = attribute(context)
                     if(hasattr(plugin_instance, 'awake_plugin')):
                         plugin_instance.awake_plugin()
+
+                    if(hasattr(plugin_instance, 'extractor_plugin')):
+                        self.extractor_plugins.append(plugin_instance.extractor_plugin())
                     
                     self.loaded_plugins.append(plugin_instance)
                     print(f"✅ Загружен плагин: {folder_name}")
@@ -80,3 +86,41 @@ class PluginLoader:
         except Exception as e:
             details = traceback.format_exc()
             print(f"Ошибка загрузки из папки {folder_name}: {details}")
+
+
+    def Source_resolver(self,url):
+        for extractor in self.extractor_plugins:
+            detection=extractor.TypeDetector(url)
+            print(detection)
+            if(detection):
+                return detection,extractor.source
+                
+        return None,None
+
+    def find_resolver(self,
+                    index: int,
+                    item: PlaylistItem,
+                    signals:  extractors.ResolveSignals,
+                    cookie_browser: str = "",
+                ):
+        for extractor in self.extractor_plugins:
+            if(extractor.source==item.source_id):
+                return extractor.ResolveTask(index,item.page_url,signals,extractor.session)
+                
+        return extractors.ResolveTask(index,item.page_url,signals,cookie_browser)
+
+    def findPL_resolver(self,
+                    index: int,
+                    url: str,
+                    signals:  extractors.JamPlaylistSignals,
+                    cookie_browser: str = "",
+                    JamPlaylist:bool = False,
+                    source_id:str = "youtube"
+                ):
+        for extractor in self.extractor_plugins:
+            if(extractor.source==source_id): 
+                return extractor.ResolveTaskPlaylist(index,url,signals,extractor.session)
+                
+        return extractors.JamPlaylistTask(index,url,signals,cookie_browser,JamPlaylist)
+
+
