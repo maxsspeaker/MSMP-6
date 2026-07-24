@@ -36,7 +36,7 @@ jobs:
           mode: standalone
           output-dir: dist
           output-file: msmp-foxwave
-          enable-plugins: pyside6,stdlib-py
+          enable-plugins: pyside6
           include-qt-plugins: multimedia,imageformats,platforms
 
       - name: Copy resources and skins into dist
@@ -89,7 +89,7 @@ jobs:
           output-file: msmp-foxwave
           windows-console-mode: disable
           windows-icon-from-ico: resources/icon.ico
-          enable-plugins: pyside6,stdlib-py
+          enable-plugins: pyside6
           include-qt-plugins: multimedia,imageformats,platforms
 
       - name: Prepare external tools
