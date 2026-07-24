@@ -38,7 +38,7 @@ jobs:
           output-file: msmp-foxwave
           enable-plugins: pyside6
           include-qt-plugins: multimedia,imageformats,platforms
-          args: --include-stdlib
+          include-stdlib
 
       - name: Copy resources and skins into dist
         shell: bash
@@ -92,7 +92,7 @@ jobs:
           windows-icon-from-ico: resources/icon.ico
           enable-plugins: pyside6
           include-qt-plugins: multimedia,imageformats,platforms
-          args: --include-stdlib
+          include-stdlib
 
       - name: Prepare external tools
         shell: pwsh
