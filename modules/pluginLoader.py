@@ -102,12 +102,13 @@ class PluginLoader:
                     item: PlaylistItem,
                     signals:  extractors.ResolveSignals,
                     cookie_browser: str = "",
+                    type=type
                 ):
         for extractor in self.extractor_plugins:
             if(extractor.source==item.source_id):
                 return extractor.ResolveTask(index,item.page_url,signals,extractor.session)
                 
-        return extractors.ResolveTask(index,item.page_url,signals,cookie_browser)
+        return extractors.ResolveTask(index,item.page_url,signals,cookie_browser,type=type)
 
     def findPL_resolver(self,
                     index: int,
@@ -121,6 +122,6 @@ class PluginLoader:
             if(extractor.source==source_id): 
                 return extractor.ResolveTaskPlaylist(index,url,signals,extractor.session)
                 
-        return extractors.JamPlaylistTask(index,url,signals,cookie_browser,JamPlaylist)
+        return extractors.ResolveTask(index,url,signals,cookie_browser,JamPlaylist)
 
 

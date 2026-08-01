@@ -683,11 +683,11 @@ class PlayerWindow(QMainWindow):
         self.resolve_signals = extractors.ResolveSignals()
         self.resolve_signals.resolved.connect(self.on_resolved)
         self.resolve_signals.failed.connect(self.on_resolve_failed)
+        self.resolve_signals.status.connect(self.on_jam_playlist_status)
 
-        self.jam_signals = extractors.JamPlaylistSignals()
-        self.jam_signals.parsed.connect(self.on_jam_playlist_parsed)
-        self.jam_signals.status.connect(self.on_jam_playlist_status)
-        self.jam_signals.failed.connect(self.on_jam_playlist_failed)
+        self.resolve_signals.parsed.connect(self.on_jam_playlist_parsed)
+        
+     #   self.jam_signals.failed.connect(self.on_jam_playlist_failed) - legacy
 
         self._last_mpris_position_us = -1
 
@@ -910,16 +910,16 @@ class PlayerWindow(QMainWindow):
         parsed=extractors.parse_youtube_link(url)
 
         if(parsed["type"]=="video&playlist"):
-            self.add_url_value(url)
+            self.add_url_value(url,type="video")
 
         elif(parsed["type"]=="playlist"):
             self.parse_jam_playlist(url="https://www.youtube.com/playlist?list="+parsed["playlist_id"])
         elif(parsed["type"]=="video"):
-            self.add_url_value(url)
+            self.add_url_value(url,type="video")
         else:
             type,source_id=self.plugin_loader.Source_resolver(url)
             if(type==None):
-                self.add_url_value(url)
+                self.add_url_value(url,type=None)
             elif(type=="audio"):
                 self.add_url_value(url,source_id=source_id)
             else:
@@ -928,7 +928,7 @@ class PlayerWindow(QMainWindow):
         self.url_input.clear()
 
 
-    def add_url_value(self, url: str, auto_play: bool = False,source_id="youtube") -> None:
+    def add_url_value(self, url: str, auto_play: bool = False,source_id="youtube",type="audio") -> None:
         row = len(self.playlist)
         self.playlist.append(PlaylistItem(page_url=url,source_id=source_id))
         self.table.insertRow(row)
@@ -939,9 +939,9 @@ class PlayerWindow(QMainWindow):
             "CanGoPrevious": bool(self.playlist),
             "CanPlay": bool(self.playlist),
         })
-        self.resolve_item(row, auto_play=auto_play)
+        self.resolve_item(row, auto_play=auto_play,type=type)
 
-    def resolve_item(self, index: int, auto_play: bool = False) -> None:
+    def resolve_item(self, index: int, auto_play: bool = False,type="audio") -> None:
         if index < 0 or index >= len(self.playlist):
             return
         if index in self.resolving_indexes:
@@ -955,6 +955,7 @@ class PlayerWindow(QMainWindow):
             self.playlist[index],
             self.resolve_signals,
             self.cookie_browser.currentData() or "",
+            type=type
         )
         task.setAutoDelete(True)
         self.thread_pool.start(task)
@@ -976,7 +977,7 @@ class PlayerWindow(QMainWindow):
         task = self.plugin_loader.findPL_resolver(
             index,
             url,
-            self.jam_signals,
+            self.resolve_signals,
             self.cookie_browser.currentData() or "",
             JamPlaylist=JamPlaylist,source_id=source_id
         )
