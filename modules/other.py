@@ -1,7 +1,7 @@
 import random,hashlib
 import os,sys
 from PySide6.QtWidgets import (
-    QApplication, QWidget, QPushButton, QVBoxLayout,
+    QApplication, QWidget, QPushButton, QVBoxLayout,QTableWidget, QProgressBar,
     QHBoxLayout, QGraphicsOpacityEffect, QLabel, QGraphicsBlurEffect,QComboBox,QFrame,QStyleOptionViewItem,QListView,QStyledItemDelegate, QStyle,QMenu, QStyleOption
 )
 from PySide6.QtGui import QColor,QPixmap, QPainter, QLinearGradient, QImage,QPalette, QPen, QBrush,QAction
@@ -98,6 +98,90 @@ class GradientImageLabel(QLabel):
         """При ресайзе картинка автоматически перекадрируется и центрируется заново"""
         super().resizeEvent(event)
         self.update_gradient_mask()
+
+
+
+class LoadingOverlay(QWidget):
+    """Виджет-оверлей, который будет накладываться поверх строки"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        
+        # Делаем фон полупрозрачным (RGBA: черный цвет с прозрачностью 100 из 255)
+        self.setStyleSheet("""
+            LoadingOverlay {
+                background-color: rgba(0, 0, 0, 100); 
+            }
+        """)
+        
+        # Создаем бесконечный прогресс-бар (анимация загрузки)
+        self.spinner = QProgressBar(self)
+        self.spinner.setRange(0, 0) # Range(0, 0) делает его бесконечным
+        self.spinner.setTextVisible(False)
+        self.spinner.setFixedHeight(15)
+        
+        # Размещаем по центру
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 0, 10, 0)
+        layout.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.spinner)
+
+class PlaylistWidget(QTableWidget):
+    """Кастомная таблица с поддержкой блокировки строк"""
+    def __init__(self, rows=None, cols=None, parent=None):
+        super().__init__(rows, cols, parent)
+        self.overlays = {} # Словарь для хранения оверлеев {row_index: overlay_widget}
+        
+        # Обновляем позиции оверлеев при прокрутке
+        self.verticalScrollBar().valueChanged.connect(self.update_overlays_position)
+        self.horizontalScrollBar().valueChanged.connect(self.update_overlays_position)
+        
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.update_overlays_position()
+
+    def setItemLoading(self, row, is_loading):
+        """Включает или выключает режим загрузки для конкретной строки"""
+        # Блокируем или разблокируем ячейки в строке
+        for col in range(self.columnCount()):
+            item = self.item(row, col)
+            if item:
+                flags = item.flags()
+                if is_loading:
+                    # Убираем флаги активности и выделения
+                    item.setFlags(flags & ~Qt.ItemIsEnabled & ~Qt.ItemIsSelectable)
+                else:
+                    # Возвращаем флаги активности
+                    item.setFlags(flags | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+
+        if is_loading:
+            if row not in self.overlays:
+                # Создаем оверлей, родителем обязательно должен быть viewport() таблицы
+                overlay = LoadingOverlay(self.viewport())
+                self.overlays[row] = overlay
+                overlay.show()
+        else:
+            if row in self.overlays:
+                # Удаляем оверлей
+                overlay = self.overlays.pop(row)
+                overlay.deleteLater()
+                
+        self.update_overlays_position()
+
+    def update_overlays_position(self):
+        """Пересчитывает геометрию оверлеев при скролле и ресайзе"""
+        for row, overlay in self.overlays.items():
+            # Получаем визуальные координаты первой и последней ячейки в строке
+            rect_first = self.visualRect(self.model().index(row, 0))
+            rect_last = self.visualRect(self.model().index(row, self.columnCount() - 1))
+            
+            if rect_first.isValid():
+                # Объединяем прямоугольники, чтобы накрыть всю строку целиком
+                target_rect = rect_first.united(rect_last)
+                overlay.setGeometry(target_rect)
+                overlay.show()
+            else:
+                # Если строка ушла за пределы видимости (скролл), скрываем оверлей
+                overlay.hide()
 
 
 

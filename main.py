@@ -67,7 +67,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QToolTip
 )
-from modules.other import GradientImageLabel,FixedComboBox,SystemMenuBar,get_ffmpeg_executable,LocalSaveDir
+from modules.other import GradientImageLabel,FixedComboBox,SystemMenuBar,get_ffmpeg_executable,LocalSaveDir,PlaylistWidget
 from modules.types import *
 from modules.pluginLoader import PluginLoader
 from modules.dbus import MprisServer
@@ -603,7 +603,8 @@ class WaveformTask(QRunnable):
 # Регистрируем кастомные виджеты после их объявления
 UIEngine.register("waveformSeekBar",  WaveformSeekBar)
 UIEngine.register("visualizerWindow", VisualizerWindow)
-
+UIEngine.register("qtablewidget", PlaylistWidget) #!!! legacy БУДЕТ УБРАНО В 6.0.4 исправте кастомные скины!!!!
+UIEngine.register("playlistwidget", PlaylistWidget)
 
 class PlayerWindow(QMainWindow):
     MAX_RESTARTS = 3
@@ -625,21 +626,27 @@ class PlayerWindow(QMainWindow):
         action1.triggered.connect(lambda: self.play_index(self.table.rowAt(position.y())))
         menu.addAction(action1)
 
-
-        action2 = QAction("Запустить Джем", self)
-        action2.triggered.connect(lambda: self.parse_jam_playlist(self.table.rowAt(position.y()))
-        )
+        action2 = QAction("Предзагрузить метаданные", self)
+        action2.triggered.connect(lambda: self.resolve_item(self.table.rowAt(position.y())))
         menu.addAction(action2)
 
         action3 = QAction("Открыть расположение", self)
         action3.triggered.connect(lambda: webbrowser.open(self.playlist[index.row()].page_url))
         menu.addAction(action3)
 
-        menu.addSeparator() # Разделитель (опционально)
+        menu.addSeparator()
 
-        action4 = QAction("Удалить", self)
-        action4.triggered.connect(lambda: self.remove_index(index.row()))
+
+        action4 = QAction("Запустить Джем", self)
+        action4.triggered.connect(lambda: self.parse_jam_playlist(self.table.rowAt(position.y()))
+        )
         menu.addAction(action4)
+
+        menu.addSeparator()
+
+        action5 = QAction("Удалить", self)
+        action5.triggered.connect(lambda: self.remove_index(index.row()))
+        menu.addAction(action5)
 
         # 5. Показываем меню в точке клика
         menu.exec(self.table.viewport().mapToGlobal(position))
@@ -756,8 +763,12 @@ class PlayerWindow(QMainWindow):
         self.restart_button      = self.ui["restart_button"]
         self.mode_button         = self.ui["mode_button"]
         self.playlistBox         = self.ui["playlistBox"]
-        self.table               = self.ui["table"]
         self.MainMenuBar         = self.ui["MainMenuBar"]
+
+        if not(self.ui.get("playlist_table")): 
+            self.table = self.ui["table"] #!!! legacy БУДЕТ УБРАНО В 6.0.4 исправте кастомные скины!!!
+        else:
+            self.table = self.ui["playlist_table"]
 
 
         file_menu = self.MainMenuBar.add_menu("Menu")
@@ -913,17 +924,17 @@ class PlayerWindow(QMainWindow):
             self.add_url_value(url,type="video")
 
         elif(parsed["type"]=="playlist"):
-            self.parse_jam_playlist(url="https://www.youtube.com/playlist?list="+parsed["playlist_id"])
+            self.add_url_value(url,type="playlist")
         elif(parsed["type"]=="video"):
             self.add_url_value(url,type="video")
         else:
             type,source_id=self.plugin_loader.Source_resolver(url)
-            if(type==None):
-                self.add_url_value(url,type=None)
-            elif(type=="audio"):
-                self.add_url_value(url,source_id=source_id)
+            if(type=="audio"):
+                self.add_url_value(url,source_id=source_id,type="audio")
+            elif(type=="playlist"):
+                self.add_url_value(url,source_id=source_id,type="playlist")
             else:
-                self.parse_jam_playlist(url=url,source_id=source_id)
+                self.add_url_value(url,type=None)
 
         self.url_input.clear()
 
@@ -944,12 +955,15 @@ class PlayerWindow(QMainWindow):
     def resolve_item(self, index: int, auto_play: bool = False,type="audio") -> None:
         if index < 0 or index >= len(self.playlist):
             return
+
+        if(auto_play):
+            self.resolve_autoplay = index
+
         if index in self.resolving_indexes:
-            self.resolve_autoplay[index] = self.resolve_autoplay.get(index, False) or auto_play
             return
 
         self.resolving_indexes.add(index)
-        self.resolve_autoplay[index] = auto_play
+        self.table.setItemLoading(index,True)
         task = self.plugin_loader.find_resolver(
             index,
             self.playlist[index],
@@ -962,27 +976,7 @@ class PlayerWindow(QMainWindow):
 
 
     def parse_jam_playlist(self, index: Optional[int]=None,url: Optional[str] = None,source_id="youtube") -> None:
-        if not(index==None):
-            if index < 0 or index >= len(self.playlist):
-                return
-
-            item = self.playlist[index]
-            self.status_label.setText("Parsing Jam playlist...")
-            url=item.page_url
-            JamPlaylist=True
-        else:
-            self.status_label.setText("Parsing playlist...")  
-            JamPlaylist=False
-
-        task = self.plugin_loader.findPL_resolver(
-            index,
-            url,
-            self.resolve_signals,
-            self.cookie_browser.currentData() or "",
-            JamPlaylist=JamPlaylist,source_id=source_id
-        )
-        task.setAutoDelete(True)
-        self.thread_pool.start(task)
+        self.resolve_item(index,type="jamplaylist_youtube")
 
     def on_jam_playlist_status(
         self,
@@ -1013,7 +1007,7 @@ class PlayerWindow(QMainWindow):
         self.pending_position = 0
         self.restart_attempts = 0
         self.resolving_indexes.clear()
-        self.resolve_autoplay.clear()
+        self.resolve_autoplay = None
         self.refresh_table()
         self.emit_mpris_properties_changed("org.mpris.MediaPlayer2.Player", {
             "CanGoNext": bool(self.playlist),
@@ -1050,7 +1044,7 @@ class PlayerWindow(QMainWindow):
 
     def on_resolved(self, index: int, item: PlaylistItem) -> None:
         self.resolving_indexes.discard(index)
-        auto_play = self.resolve_autoplay.pop(index, False)
+        auto_play = self.resolve_autoplay
         if index < 0 or index >= len(self.playlist):
             return
 
@@ -1060,14 +1054,16 @@ class PlayerWindow(QMainWindow):
             item.waveform_ready = True
 
         self.playlist[index] = item
+        self.table.setItemLoading(index,False)
         self.set_row(index, item)
         self.status_label.setText(f"Resolved: {item.title}")
 
         if self.current_index == index:
             self.update_current_metadata(item)
 
-        if auto_play:
-            self.start_playback(index)
+        if not auto_play == None:
+            if(auto_play==index):
+                self.start_playback(index)
 
     def on_resolve_failed(
         self,
@@ -1077,7 +1073,9 @@ class PlayerWindow(QMainWindow):
     ) -> None:
         self.resolving_indexes.discard(index)
         if not(index==None):
-            self.resolve_autoplay.pop(index, None)
+            self.table.setItemLoading(index,False)
+            if(index==self.resolve_autoplay):
+                self.resolve_autoplay=None
             if 0 <= index < len(self.playlist):
                 item = self.playlist[index]
                 item.stream_url = ""
@@ -1131,10 +1129,18 @@ class PlayerWindow(QMainWindow):
             background = QBrush(QColor("#1e2a33"))
         elif item.unavailable:
             background = QBrush(QColor("#0b0b0b"))
+        elif not item.stream_url:
+            background = QBrush(QColor("#0f0f0f"))
         else:
             background = QBrush() 
 
-        foreground = QBrush(QColor("#5f6368" if item.unavailable else "#f2f2f2"))
+        if item.unavailable:
+            foreground = QBrush(QColor("#5f6368"))
+
+        elif not item.stream_url:
+            foreground = QBrush(QColor("#a5a5a5"))
+        else:
+            foreground = QBrush(QColor("#f2f2f2"))
 
         for column in range(self.table.columnCount()):
             table_item = self.table.item(row, column)

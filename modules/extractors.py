@@ -314,18 +314,14 @@ class ResolveTask(QRunnable):
         index: int,
         url: str,
         signals: ResolveSignals,
-        cookie_browser: str = "",JamPlaylist=False,type=None
+        cookie_browser: str = "",type=None
     ) -> None:
         super().__init__()
         self.index = index
         self.cookie_browser = cookie_browser
         self.signals = signals
-        if(JamPlaylist):
-            self.type="playlist"
-            self.url = self._makeJamPlaylist(url)
-        else:
-            self.url = url
-            self.type=type
+        self.url = url
+        self.type=type
 
     @Slot()
     def run(self) -> None:
@@ -333,6 +329,9 @@ class ResolveTask(QRunnable):
 
             if not(self.type):
                 self.type=self.noNameTypeDetector(self.url)
+            elif (self.type=="jamplaylist_youtube"):
+                self.url=self._makeJamPlaylist(self.url)
+                self.type="playlist"
             else:
                 print("Resolving audio")
 
@@ -343,6 +342,7 @@ class ResolveTask(QRunnable):
                 "--flat-playlist",
                 "--dump-single-json",
                 "--no-check-certificates",
+           #     "--proxy","socks5://127.0.0.1:2080/", - for tests proxy
                 "--retries",
                 "3",
                 "--fragment-retries",

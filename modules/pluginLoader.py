@@ -102,7 +102,7 @@ class PluginLoader:
                     item: PlaylistItem,
                     signals:  extractors.ResolveSignals,
                     cookie_browser: str = "",
-                    type=type
+                    type=None
                 ):
         for extractor in self.extractor_plugins:
             if(extractor.source==item.source_id):
@@ -122,6 +122,6 @@ class PluginLoader:
             if(extractor.source==source_id): 
                 return extractor.ResolveTaskPlaylist(index,url,signals,extractor.session)
                 
-        return extractors.ResolveTask(index,url,signals,cookie_browser,JamPlaylist)
+        return extractors.ResolveTask(index,url,signals,cookie_browser)
 
 

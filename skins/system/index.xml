@@ -119,7 +119,7 @@
     <qwidget id="playlistBox" flex="v"
              margin="0" spacing="0">
 
-        <qtablewidget id="table" stretch="1" />
+        <playlistwidget id="playlist_table" stretch="1" />
 
         <!-- Строка управления: Add / URL / cookies / Clear / Save / Load
              spacing="6" соответствует оригинальному playlist_menu.setSpacing(6) -->
