@@ -5,7 +5,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QGraphicsOpacityEffect, QLabel, QGraphicsBlurEffect,QComboBox,QFrame,QStyleOptionViewItem,QListView,QStyledItemDelegate, QStyle,QMenu, QStyleOption
 )
 from PySide6.QtGui import QColor,QPixmap, QPainter, QLinearGradient, QImage,QPalette, QPen, QBrush,QAction
-from PySide6.QtCore import QPropertyAnimation, QRect, QEasingCurve, Qt, Signal,QObject, QProcess,QParallelAnimationGroup,QSize
+from PySide6.QtCore import QPropertyAnimation, QRect, QEasingCurve, Qt, Signal,QObject, QProcess,QParallelAnimationGroup,QSize, Slot
+from PySide6.QtMultimedia import QAudioOutput, QMediaDevices, QMediaPlayer,QAudioBufferOutput
 import __main__ 
 import re
 import subprocess
@@ -100,6 +101,27 @@ class GradientImageLabel(QLabel):
         self.update_gradient_mask()
 
 
+class AudioController():
+
+    def _init_player(self):
+
+        self.player = QMediaPlayer(self)
+        self.audio_output = QAudioOutput(self)
+        self.audio_buffer_output = QAudioBufferOutput(self)
+        self.player.setAudioOutput(self.audio_output)
+        self.player.setAudioBufferOutput(self.audio_buffer_output)
+        self.audio_output.setVolume(0.8)
+
+        self.media_devices = QMediaDevices()
+
+        self.media_devices.audioOutputsChanged.connect(self._update_to_default_device)
+
+        self._update_to_default_device()
+
+    def _update_to_default_device(self):
+        default_device = QMediaDevices.defaultAudioOutput()
+        self.audio_output.setDevice(default_device)
+        print(f"Устройство вывода установлено на: {default_device.description()}")
 
 class LoadingOverlay(QWidget):
     """Виджет-оверлей, который будет накладываться поверх строки"""
@@ -166,6 +188,18 @@ class PlaylistWidget(QTableWidget):
                 overlay.deleteLater()
                 
         self.update_overlays_position()
+
+    def clearPlaylistView(self):
+        """Полностью очищает плейлист и удаляет все оверлеи"""
+        # 1. Безопасно удаляем все виджеты оверлеев из памяти
+        for overlay in self.overlays.values():
+            overlay.deleteLater()
+        
+        # 2. Очищаем словарь, чтобы не осталось ссылок на удаленные объекты
+        self.overlays.clear()
+        
+        # 3. Удаляем все строки из таблицы
+        self.setRowCount(0)
 
     def update_overlays_position(self):
         """Пересчитывает геометрию оверлеев при скролле и ресайзе"""
@@ -305,27 +339,6 @@ class SystemMenuBar(QWidget):
         
         self.menus = {}
 
-        self.setStyleSheet(f"""
-            QWidget#MainMenuBar {{
-                background-color: rgba(0, 0, 0, 50); 
-            }}
-            QWidget#MainMenuBar QPushButton {{
-                background-color: transparent;
-                color: white;
-                font-family: 'Segoe UI', Arial;
-                font-size: 13px;
-                padding: 0px 6px;
-                border: none;
-                border-radius: 0px;
-            }}
-            QWidget#MainMenuBar QPushButton:hover {{
-                background-color: rgba(255, 255, 255, 40);
-            }}
-            QWidget#MainMenuBar QPushButton::menu-indicator {{
-                image: none; 
-            }}
-        """)
-
     def add_menu(self, title: str) -> QMenu:
         btn = QPushButton(title, self)
         menu = QMenu(self)
@@ -399,6 +412,8 @@ def LocalSaveDir():
             return os.path.dirname(os.path.abspath(sys.argv[0]))
         else:
             return os.path.dirname(os.path.abspath(sys.modules['__main__'].__file__))
+    else:
+        raise RuntimeError("MSMP not supported on this platform")
 
 
 

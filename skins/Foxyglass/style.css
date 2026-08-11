@@ -115,3 +115,24 @@ VisualizerWindow{
         qproperty-barColorHigh: #6d6d6d;
         qproperty-barColorPeak: #6d6d6d;
 }
+
+
+QWidget#MainMenuBar {
+    background-color: rgba(0, 0, 0, 50); 
+}
+QWidget#MainMenuBar QPushButton {
+    background-color: transparent;
+    color: white;
+    font-family: 'Segoe UI', Arial;
+    font-size: 13px;
+    padding: 0px 6px;
+    border: none;
+    border-radius: 0px;
+}
+QWidget#MainMenuBar QPushButton:hover {
+    background-color: rgba(255, 255, 255, 40);
+}
+
+QWidget#MainMenuBar QPushButton::menu-indicator {
+    image: none; 
+}

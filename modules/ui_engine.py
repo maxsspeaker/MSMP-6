@@ -29,6 +29,7 @@ ui_engine.py — XML-driven UI engine for PySide6
 
 Поддерживаемые атрибуты:
     id              → setObjectName + engine.widgets["id"]
+    widget_class    → setObjectName
     style           → setStyleSheet
     flex            → тип layout: "h"|"hbox"|"v"|"vbox"|"grid"|"form"
     connect         → имя слота контекста
@@ -75,9 +76,9 @@ from PySide6.QtWidgets import (
     QDateTimeEdit, QDateEdit, QTimeEdit, QFontComboBox, QDial,
     QToolButton, QCommandLinkButton, QKeySequenceEdit,
     QHBoxLayout, QVBoxLayout, QGridLayout, QFormLayout,
-    QLayout, QSizePolicy,
+    QLayout, QSizePolicy,QStyle
 )
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import Qt, QSize,QTimer
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -321,6 +322,10 @@ class UIEngine:
             widget.setObjectName(widget_id)
             self.widgets[widget_id] = widget
 
+        widget_class = attrs.get("class", "").strip()
+        if widget_class:
+            widget.setObjectName(widget_class)
+
         if is_named_container:
             self.widgets.setdefault(tag, widget)
 
@@ -489,3 +494,40 @@ class UIEngine:
             f"[UIEngine] Предупреждение: не найден подходящий сигнал "
             f"для '{widget.__class__.__name__}'."
         )
+
+
+
+class qJumpSlider(QSlider):
+    def __init__(self, orientation=Qt.Orientation.Horizontal, parent=None):
+        super().__init__(orientation, parent)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            # Вычисляем новое значение напрямую по координате клика
+            if self.orientation() == Qt.Orientation.Horizontal:
+                new_value = QStyle.sliderValueFromPosition(
+                    self.minimum(), self.maximum(), 
+                    event.position().toPoint().x(), self.width()
+                )
+            else:
+                new_value = QStyle.sliderValueFromPosition(
+                    self.minimum(), self.maximum(), 
+                    event.position().toPoint().y(), self.height()
+                )
+            
+            # Устанавливаем значение
+            self.sliderPressed.emit()
+            self.setValue(new_value)
+
+            QTimer.singleShot(
+                100,
+                lambda:self.sliderReleased.emit(),
+            )
+            
+            # ВАЖНО: передаем событие дальше базовому классу!
+            # Это позволит Qt "подхватить" ползунок для плавного drag-and-drop
+            super().mousePressEvent(event)
+        else:
+            super().mousePressEvent(event)
+
+UIEngine.register("qjumpslider", qJumpSlider)

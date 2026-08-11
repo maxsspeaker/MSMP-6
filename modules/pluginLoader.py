@@ -113,7 +113,6 @@ class PluginLoader:
     def findPL_resolver(self,
                     index: int,
                     url: str,
-                    signals:  extractors.JamPlaylistSignals,
                     cookie_browser: str = "",
                     JamPlaylist:bool = False,
                     source_id:str = "youtube"

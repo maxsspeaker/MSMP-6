@@ -29,7 +29,7 @@
 
         <!-- Фоновое изображение — позиционируется вручную через resizeEvent -->
         <gradientImageLabel id="cover_background"
-                            fixed-height="210"
+                            fixed-height="210" Align="AlignCenter"
                             visible="true" blur_effect="16" nolayout="true"/>
 
         <systemmenubar id="MainMenuBar" visible="true"/>
@@ -40,7 +40,7 @@
                  margin="16,0,16,0" spacing="0"
                  stretch="1">
 
-            <gradientImageLabel id="cover_label"
+            <gradientImageLabel id="cover_label" class="cover" Align="AlignCenter"
                                 fixed-width="128" fixed-height="128" blur_effect="0"/>
 
             <!-- Мета-блок: заголовок + исполнитель + альбом, прижаты к центру -->
@@ -49,13 +49,13 @@
                      stretch="1">
                 <!-- верхний распор -->
                 <qwidget stretch="1" />
-                <qlabel id="track_title_label"
+                <qlabel id="track_title_label" class="metaText"
                         style="color:#f5f5f5; font-size:19px; font-weight:700;
                                margin:2px; margin-left:10px;" />
-                <qlabel id="artist_label"
+                <qlabel id="artist_label" class="metaText"
                         style="color:#a8a8a8; font-size:14px;
                                margin:2px; margin-left:10px;" />
-                <qlabel id="album_label"
+                <qlabel id="album_label" class="metaText"
                         style="color:#a8a8a8; font-size:14px;
                                margin:2px; margin-left:10px;" />
                 <!-- нижний распор -->
@@ -97,7 +97,7 @@
             <!-- правый распор — в 3 раза шире левого, прижимает кнопки к центру -->
             <qwidget stretch="3" />
 
-            <qlabel id="time_label" text="0:00 / 0:00"
+            <qlabel id="time_label" class="durationText" text="0:00 / 0:00"
                     style="color:#ffffff;" />
 
             <qpushbutton id="mode_button" connect="toggle_play_mode" />
@@ -144,7 +144,7 @@
     </qwidget>
 
     <!-- Статусная строка -->
-    <qlabel id="status_label" text="Ready"
+    <qlabel id="status_label" class="statusText" text="Ready"
             style="color:#8f8f8f; padding:5px 10px; border-top:1px solid #161616;" />
 
 </qwidget>

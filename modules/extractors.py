@@ -112,8 +112,7 @@ def extract_youtube_video_id(page_url: str) -> str:
 
 def run_external_ytdlp(
     args: list[str],
-    status=None,
-) -> dict:
+    status=None) -> dict:
     executable = get_ytdlp_executable()
     cmd = [executable, *args]
     CREATE_NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0) if sys.platform == "win32" else 0
@@ -322,6 +321,7 @@ class ResolveTask(QRunnable):
         self.signals = signals
         self.url = url
         self.type=type
+        self._cancelled=False
 
     @Slot()
     def run(self) -> None:
@@ -353,12 +353,15 @@ class ResolveTask(QRunnable):
 
 
             if (self.type=="playlist"):
-                data = run_external_ytdlp(args, status=self.signals.status)
+                data = self.run_external_ytdlp(args, status=self.signals.status)
             else:
                 args.append("--format")
                 args.append("bestaudio/best")
                 args.append("--no-playlist")
-                data = run_external_ytdlp(args)
+                data = self.run_external_ytdlp(args)
+
+            if(data.get("canceled")):
+                return
 
 
             if not isinstance(data, dict):
@@ -393,6 +396,59 @@ class ResolveTask(QRunnable):
                 self.signals.failed.emit(self.index, error, details)
             except RuntimeError:
                 print(details, file=sys.stderr, flush=True)
+
+
+    def run_external_ytdlp(self,args: list[str],status=None) -> dict:
+        executable = get_ytdlp_executable()
+        cmd = [executable, *args]
+        CREATE_NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0) if sys.platform == "win32" else 0
+        custom_env = dict(os.environ)
+        custom_env.pop("LD_PRELOAD", None)
+        self._proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,   
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",creationflags=CREATE_NO_WINDOW,env=custom_env
+            )
+        json_data=None
+
+        while True:
+            line = self._proc.stdout.readline()
+                
+            if not line and self._proc.poll() is not None:
+                break
+                
+            if line:
+                if line.startswith('{'):
+                    json_data = line.strip()
+                else:
+                    if(status):
+                        status.emit(line.strip())
+                    print(line, end='')
+
+        self._proc.wait()
+
+        if self._proc.returncode == -9:
+            return {"canceled":True}
+
+        elif self._proc.returncode != 0:
+            message = self._proc.stderr.readline() or f"yt-dlp exited with code {self._proc.returncode}"
+            raise RuntimeError(message)
+
+        payload = json_data
+        if not payload:
+            raise RuntimeError("yt-dlp returned no data")
+
+        try:
+            return json.loads(json_data)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"Failed to parse yt-dlp JSON output: {exc}") from exc
+
+    def cancel(self) -> None:
+        self._cancelled = True
+        if self._proc is not None and self._proc.poll() is None:
+            self._proc.kill()  
 
 
     def noNameTypeDetector(self,url):
@@ -522,6 +578,24 @@ class ResolveTask(QRunnable):
 
         return max(audio_formats, key=score)["url"]
 
+
+
+class resolverControler():
+    def __init__(self,thread_pool):
+        self.thread_pool = thread_pool
+        self.resolving_indexes = {}
+
+
+    def addTask(self,index,task):
+        self.resolving_indexes[index]=task
+        task.setAutoDelete(True)
+        self.thread_pool.start(task)
+
+    def clear(self):
+        for index in self.resolving_indexes:
+            self.resolving_indexes[index].cancel()
+
+        self.resolving_indexes.clear()
 
 
 

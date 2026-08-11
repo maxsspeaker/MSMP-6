@@ -67,7 +67,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QToolTip
 )
-from modules.other import GradientImageLabel,FixedComboBox,SystemMenuBar,get_ffmpeg_executable,LocalSaveDir,PlaylistWidget
+from modules.other import GradientImageLabel,FixedComboBox,SystemMenuBar,get_ffmpeg_executable,LocalSaveDir,PlaylistWidget,AudioController
 from modules.types import *
 from modules.pluginLoader import PluginLoader
 from modules.dbus import MprisServer
@@ -600,13 +600,16 @@ class WaveformTask(QRunnable):
         return [min(1.0, max(0.0, (value / peak) ** 0.82)) for value in waveform]
 
 
+
+
+
 # Регистрируем кастомные виджеты после их объявления
 UIEngine.register("waveformSeekBar",  WaveformSeekBar)
 UIEngine.register("visualizerWindow", VisualizerWindow)
-UIEngine.register("qtablewidget", PlaylistWidget) #!!! legacy БУДЕТ УБРАНО В 6.0.4 исправте кастомные скины!!!!
+UIEngine.register("qtablewidget", PlaylistWidget) #!!! legacy БУДЕТ УБРАНО В 6.0.4 исправьте кастомные скины!!!!
 UIEngine.register("playlistwidget", PlaylistWidget)
 
-class PlayerWindow(QMainWindow):
+class PlayerWindow(QMainWindow,AudioController):
     MAX_RESTARTS = 3
     PLAY_MODES_icons = ("resources/arrow-s-right.svg", "resources/out-loop.svg", "resources/loop.svg", "resources/shuffle.svg")
     PLAY_MODES = ("Seq", "One", "All", "Rnd")
@@ -671,12 +674,12 @@ class PlayerWindow(QMainWindow):
         self.pending_position = 0
         self.restart_attempts = 0
         self.user_dragging = False
-        self.resolving_indexes: set[int] = set()
-        self.resolve_autoplay: dict[int, bool] = {}
+        self.resolve_autoplay = None
         self.play_mode_index = 0
         self.error_boxes: list[QMessageBox] = []
         self.playlist_title = "MSMP5 Playlist"
         self.playlist_image_url = "https://msmp.maxsspeaker.space/static/img/Missing.png"
+
 
         self.mpris_server = MprisServer()
         self.mpris_playback_status = "Stopped"
@@ -686,6 +689,7 @@ class PlayerWindow(QMainWindow):
         self.mpris_position_timer.timeout.connect(self.sync_mpris_position)
 
         self.thread_pool = QThreadPool.globalInstance()
+        self.resolverManager = extractors.resolverControler(self.thread_pool)
         
         self.resolve_signals = extractors.ResolveSignals()
         self.resolve_signals.resolved.connect(self.on_resolved)
@@ -708,12 +712,7 @@ class PlayerWindow(QMainWindow):
         self.network = QNetworkAccessManager(self)
         self.network.finished.connect(self.on_artwork_loaded)
 
-        self.player = QMediaPlayer(self)
-        self.audio_output = QAudioOutput(self)
-        self.audio_buffer_output = QAudioBufferOutput(self)
-        self.player.setAudioOutput(self.audio_output)
-        self.player.setAudioBufferOutput(self.audio_buffer_output)
-        self.audio_output.setVolume(0.8)
+        self._init_player()
 
         self.player.positionChanged.connect(self.on_position_changed)
         self.player.durationChanged.connect(self.on_duration_changed)
@@ -742,11 +741,7 @@ class PlayerWindow(QMainWindow):
         self.NowDisplay          = self.ui["NowDisplay"]
         self.cover_background    = self.ui.get("cover_background")
         self.cover_label         = self.ui["cover_label"]
-        self.track_title_label   = self.ui["track_title_label"]
-        self.artist_label        = self.ui["artist_label"]
-        self.album_label         = self.ui["album_label"]
         self.position_slider     = self.ui["position_slider"]
-        self.time_label          = self.ui["time_label"]
         self.volume_slider       = self.ui["volume_slider"]
         self.status_label        = self.ui["status_label"]
         self.url_input           = self.ui["url_input"]
@@ -766,7 +761,7 @@ class PlayerWindow(QMainWindow):
         self.MainMenuBar         = self.ui["MainMenuBar"]
 
         if not(self.ui.get("playlist_table")): 
-            self.table = self.ui["table"] #!!! legacy БУДЕТ УБРАНО В 6.0.4 исправте кастомные скины!!!
+            self.table = self.ui["table"] #!!! legacy БУДЕТ УБРАНО В 6.0.4 исправьте кастомные скины!!!
         else:
             self.table = self.ui["playlist_table"]
 
@@ -774,6 +769,9 @@ class PlayerWindow(QMainWindow):
         file_menu = self.MainMenuBar.add_menu("Menu")
         file_menu.addAction("About",lambda:AboutWindow(self).exec())
         self.PlguinMenu=self.MainMenuBar.add_submenu(file_menu, "Plugins")
+        
+        self.PluginMenu=self.PlguinMenu #!!! legacy БУДЕТ УБРАНО В 6.0.4 исправьте кастомные скины!!!
+
         file_menu.addSeparator()
         file_menu.addAction("Exit", self.close)
         file_menu.addSeparator()
@@ -795,26 +793,17 @@ class PlayerWindow(QMainWindow):
             self.cover_background.lower()
             self.cover_background.setGeometry(self.NowDisplay.rect())
 
-        self.track_title_label.setText("No track")
-        self.artist_label.setText("Unknown artist")
-        self.album_label.setText("Unknown album")
+        self.set_metaData(
+            time_possition="0:00",
+            time_end="0:00",
+            track_title="No track",
+            artist="Unknown artist",
+            album="Unknown album"
+            )
 
         # ── Донастройка cover_label ────────────────────────────────────────
-        self.cover_label.setAlignment(Qt.AlignCenter)
-        self.cover_label.setObjectName("cover")
         self.set_cover_placeholder()
 
-        # ── Донастройка мета-меток ────────────────────────────────────────
-        self.track_title_label.setObjectName("trackTitle")
-        self.track_title_label.setWordWrap(True)
-        self.artist_label.setObjectName("metaText")
-        self.album_label.setObjectName("metaText")
-
-        # ── Донастройка status_label ──────────────────────────────────────
-        self.status_label.setObjectName("statusText")
-
-        # ── Донастройка time_label ────────────────────────────────────────
-        self.time_label.setObjectName("durationText")
 
         # ── Иконки кнопок управления ──────────────────────────────────────
         for btn, icon_file in (
@@ -846,8 +835,8 @@ class PlayerWindow(QMainWindow):
         # ── Донастройка seek bar ──────────────────────────────────────────
 
         if isinstance(self.position_slider, WaveformSeekBar):
-            self.position_slider.setRange(0, 0)
             self.position_slider.set_buffered_ratio(0.0)
+        self.position_slider.setRange(0, 0)
 
         self.position_slider.sliderPressed.connect(self.on_seek_start)
         self.position_slider.sliderReleased.connect(self.on_seek_end)
@@ -911,7 +900,8 @@ class PlayerWindow(QMainWindow):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self.cover_background.setGeometry(0, 0, self.width(), self.height())
+        if(self.cover_background):
+            self.cover_background.setGeometry(0, 0, self.width(), self.height())
 
     def add_url(self) -> None:
         url = self.url_input.text().strip()
@@ -959,20 +949,17 @@ class PlayerWindow(QMainWindow):
         if(auto_play):
             self.resolve_autoplay = index
 
-        if index in self.resolving_indexes:
+        if self.resolverManager.resolving_indexes.get(index):
             return
 
-        self.resolving_indexes.add(index)
         self.table.setItemLoading(index,True)
-        task = self.plugin_loader.find_resolver(
+        self.resolverManager.addTask(index,self.plugin_loader.find_resolver(
             index,
             self.playlist[index],
             self.resolve_signals,
             self.cookie_browser.currentData() or "",
             type=type
-        )
-        task.setAutoDelete(True)
-        self.thread_pool.start(task)
+        ))
 
 
     def parse_jam_playlist(self, index: Optional[int]=None,url: Optional[str] = None,source_id="youtube") -> None:
@@ -1006,7 +993,7 @@ class PlayerWindow(QMainWindow):
         self.current_index = None
         self.pending_position = 0
         self.restart_attempts = 0
-        self.resolving_indexes.clear()
+        self.resolverManager.clear()
         self.resolve_autoplay = None
         self.refresh_table()
         self.emit_mpris_properties_changed("org.mpris.MediaPlayer2.Player", {
@@ -1043,9 +1030,12 @@ class PlayerWindow(QMainWindow):
         box.open()
 
     def on_resolved(self, index: int, item: PlaylistItem) -> None:
-        self.resolving_indexes.discard(index)
+        self.resolverManager.resolving_indexes.pop(index,None)
         auto_play = self.resolve_autoplay
         if index < 0 or index >= len(self.playlist):
+            return
+
+        if not item.page_url==self.playlist[index].page_url:
             return
 
         cached_waveform = self.waveform_cache.get(item.page_url)
@@ -1071,7 +1061,7 @@ class PlayerWindow(QMainWindow):
         error: str,
         details: str = "",
     ) -> None:
-        self.resolving_indexes.discard(index)
+        self.resolverManager.resolving_indexes.pop(index,None)
         if not(index==None):
             self.table.setItemLoading(index,False)
             if(index==self.resolve_autoplay):
@@ -1163,7 +1153,7 @@ class PlayerWindow(QMainWindow):
             self.apply_row_style(row)
 
     def refresh_table(self) -> None:
-        self.table.setRowCount(0)
+        self.table.clearPlaylistView()
         for row, item in enumerate(self.playlist):
             self.table.insertRow(row)
             self.set_row(row, item)
@@ -1248,6 +1238,8 @@ class PlayerWindow(QMainWindow):
         self.refresh_row_style(previous_index)
         self.refresh_row_style(index)
         self.update_current_metadata(item)
+        
+        self.resolve_autoplay=None
 
         self._last_mpris_position_us = -1
         if isinstance(self.position_slider, WaveformSeekBar):
@@ -1275,6 +1267,10 @@ class PlayerWindow(QMainWindow):
             QTimer.singleShot(
                 600,
                 lambda pos=restored_position: self.set_player_position(pos, emit_seeked=False),
+            )
+            QTimer.singleShot(
+                600,
+                lambda pos=restored_position: self.events.on_sync_position.emit(pos),
             )
         else:
             self.events.on_start_playback.emit(index)
@@ -1335,16 +1331,45 @@ class PlayerWindow(QMainWindow):
             self.current_index -= 1
         self.refresh_table()
 
+    def set_metaData(self,time_possition=None,time_end=None,track_title=None,artist=None,album=None):
+        if(time_possition and time_end):
+            time_label=self.ui.get("time_label")
+            time_possition_label=self.ui.get("time_possition_label")
+            time_end_label=self.ui.get("time_end_label")
+            if(time_label):
+                time_label.setText(f"{time_possition} / {time_end}")
+            if(time_possition_label):
+                time_label.setText(f"{time_possition}")
+            if(time_end_label):
+                time_label.setText(f"{time_end}")
+
+
+        if(track_title):
+            track_title_label=self.ui.get("track_title_label")
+            if(track_title_label):
+                track_title_label.setText(track_title)
+        if(artist):
+            artist_label=self.ui.get("artist_label")
+            if(artist_label):
+                artist_label.setText(artist)
+        if(album):
+            album_label=self.ui.get("album_label")
+            if(album_label):
+                album_label.setText(album)
+
     def clear_playlist(self) -> None:
         self.stop_playback()
         self.playlist.clear()
         self.current_index = None
-        self.table.setRowCount(0)
+        self.table.clearPlaylistView()
         self.position_slider.setRange(0, 0)
-        self.time_label.setText("0:00 / 0:00")
-        self.track_title_label.setText("No track")
-        self.artist_label.setText("Unknown artist")
-        self.album_label.setText("Unknown album")
+        self.set_metaData(
+            time_possition="0:00",
+            time_end="0:00",
+            track_title="No track",
+            artist="Unknown artist",
+            album="Unknown album"
+            )
         self.set_cover_placeholder()
 
         if isinstance(self.position_slider, WaveformSeekBar):
@@ -1491,16 +1516,17 @@ class PlayerWindow(QMainWindow):
         )
 
     def update_current_metadata(self, item: PlaylistItem) -> None:
-        self.track_title_label.setText(item.title or "No track")
-        self.artist_label.setText(item.uploader or "Unknown artist")
-        self.album_label.setText(item.album or self.playlist_title or "Unknown album")
-
+        self.set_metaData(
+            track_title=item.title or "No track",
+            artist=item.uploader or "Unknown artist",
+            album=item.album or self.playlist_title or "Unknown album"
+            )
         self.events.on_update_current_metadata.emit(item)
+
+        self.set_cover_placeholder()
 
         if item.artwork_url:
             self.network.get(QNetworkRequest(QUrl(item.artwork_url)))
-        else:
-            self.set_cover_placeholder()
 
     def set_cover_placeholder(self) -> None:
         if (self.cover_background):
@@ -1517,7 +1543,8 @@ class PlayerWindow(QMainWindow):
                 Qt.SmoothTransformation,
             )
             self.cover_label.set_new_image(scaled)
-            self.cover_background.set_new_image(scaled)
+            if (self.cover_background):
+                self.cover_background.set_new_image(scaled)
         else:
             self.set_cover_placeholder()
         reply.deleteLater()
@@ -1942,11 +1969,11 @@ class PlayerWindow(QMainWindow):
     def on_position_changed(self, position: int) -> None:
         if not self.user_dragging:
             self.position_slider.setValue(position)
-        self.update_time_label(position, self.player.duration())
+        self.set_metaData(time_possition=self.format_time(position),time_end=self.format_time(self.player.duration()))
 
     def on_duration_changed(self, duration: int) -> None:
         self.position_slider.setRange(0, max(0, duration))
-        self.update_time_label(self.player.position(), duration)
+        self.set_metaData(time_possition=self.format_time(self.player.position()),time_end=self.format_time(duration))
         self.emit_mpris_properties_changed("org.mpris.MediaPlayer2.Player", {
             "Metadata": self.mpris_metadata(),
             "CanSeek": duration > 0,
@@ -1956,15 +1983,11 @@ class PlayerWindow(QMainWindow):
         self.user_dragging = True
 
     def on_seek_preview(self, position: int) -> None:
-        self.update_time_label(position, self.player.duration())
+        self.set_metaData(time_possition=self.format_time(position),time_end=self.format_time(self.player.duration()))
 
     def on_seek_end(self) -> None:
         self.user_dragging = False
         self.set_player_position(self.position_slider.value())
-
-    def update_time_label(self, position: int, duration: int) -> None:
-        self.time_label.setText(f"{self.format_time(position)} / {self.format_time(duration)}")
-        #self.duration_label.setText(self.format_time(duration))
 
     def on_volume_changed(self, value: int) -> None:
         self.emit_mpris_properties_changed("org.mpris.MediaPlayer2.Player", {

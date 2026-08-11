@@ -43,3 +43,12 @@ VisualizerWindow{
         qproperty-barColorHigh: #6d6d6d;
         qproperty-barColorPeak: #6d6d6d;
 }
+
+
+QWidget#MainMenuBar {
+    background-color: rgba(0, 0, 0, 50); 
+}
+QWidget#MainMenuBar QPushButton {
+    background-color: transparent;
+    border-radius: 0px;
+}
