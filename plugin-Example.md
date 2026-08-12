@@ -12,7 +12,7 @@ class ExamplePlugin(PluginBase):
     def init_plugin(self):
         self.my_folder = os.path.dirname(__file__)
 
-        self.StarFildMenu=self.main_window.MainMenuBar.add_submenu(self.main_window.PlguinMenu, "hello_world_plugin", hide_if_empty=False)
+        self.StarFildMenu=self.main_window.MainMenuBar.add_submenu(self.main_window.PluginMenu, "hello_world_plugin", hide_if_empty=False)
 
         self.StarFildMenu.addAction("Show Message", self.show_dialog)
 
