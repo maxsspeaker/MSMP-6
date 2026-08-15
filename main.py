@@ -96,7 +96,7 @@ def is_video_unavailable_error(error: str) -> bool:
     message = error.lower()
     return (
         "video unavailable" in message
-        and "this video is not available" in message
+        or "this video is not available" in message
     )
 
 
@@ -796,9 +796,9 @@ class PlayerWindow(QMainWindow,AudioController):
         self.set_metaData(
             time_possition="0:00",
             time_end="0:00",
-            track_title="No track",
-            artist="Unknown artist",
-            album="Unknown album"
+            track_title="",
+            artist="",
+            album=""
             )
 
         # ── Донастройка cover_label ────────────────────────────────────────
@@ -1200,6 +1200,7 @@ class PlayerWindow(QMainWindow,AudioController):
         self._last_mpris_position_us = 0
         self.update_buffer_progress(0.0)
         self.set_mpris_playback_status("Stopped")
+
         self.update_mpris_player_properties({"Position": 0})
         self.events.on_playback_stopped.emit()
 

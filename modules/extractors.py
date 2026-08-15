@@ -114,7 +114,7 @@ def run_external_ytdlp(
     args: list[str],
     status=None) -> dict:
     executable = get_ytdlp_executable()
-    cmd = [executable, *args]
+    cmd = [executable,"--encoding", "UTF-8", *args]
     CREATE_NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0) if sys.platform == "win32" else 0
     custom_env = dict(os.environ)
     custom_env.pop("LD_PRELOAD", None)
@@ -145,6 +145,8 @@ def run_external_ytdlp(
 
     if proc.returncode != 0:
         message = proc.stderr.readline() or f"yt-dlp exited with code {proc.returncode}"
+        if(message==""):
+            raise RuntimeError("unknow error, check logs")
         raise RuntimeError(message)
 
     payload = json_data
@@ -348,16 +350,20 @@ class ResolveTask(QRunnable):
                 "--fragment-retries",
                 "3",
                 *build_ytdlp_browser_args(self.cookie_browser),
-                self.url,
             ]
+            print("".join(args))
 
 
             if (self.type=="playlist"):
+                args.append("--")
+                args.append(self.url)
                 data = self.run_external_ytdlp(args, status=self.signals.status)
             else:
                 args.append("--format")
                 args.append("bestaudio/best")
                 args.append("--no-playlist")
+                args.append("--")
+                args.append(self.url)
                 data = self.run_external_ytdlp(args)
 
             if(data.get("canceled")):
@@ -461,6 +467,7 @@ class ResolveTask(QRunnable):
                 "--no-check-certificates",
                 "--retries","3",
                 *build_ytdlp_browser_args(self.cookie_browser),
+                "--",
                 url,
             ]
         print("Resolving no Name")
