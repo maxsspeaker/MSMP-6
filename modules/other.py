@@ -2,10 +2,10 @@ import random,hashlib
 import os,sys
 from PySide6.QtWidgets import (
     QApplication, QWidget, QPushButton, QVBoxLayout,QTableWidget, QProgressBar,
-    QHBoxLayout, QGraphicsOpacityEffect, QLabel, QGraphicsBlurEffect,QComboBox,QFrame,QStyleOptionViewItem,QListView,QStyledItemDelegate, QStyle,QMenu, QStyleOption,QTableWidgetItem
+    QHBoxLayout, QGraphicsOpacityEffect, QLabel, QGraphicsBlurEffect,QComboBox,QFrame,QStyleOptionViewItem,QListView,QStyledItemDelegate, QStyle,QMenu, QStyleOption,QTableWidgetItem,QAbstractItemView
 )
 from PySide6.QtGui import QColor,QPixmap, QPainter, QLinearGradient, QImage,QPalette, QPen, QBrush,QAction,QFont
-from PySide6.QtCore import QPropertyAnimation, QRect, QEasingCurve, Qt, Signal,QObject, QProcess,QParallelAnimationGroup,QSize, Slot
+from PySide6.QtCore import QPropertyAnimation, QRect, QEasingCurve, Qt, Signal,QObject, QProcess,QParallelAnimationGroup,QSize, Slot,QPersistentModelIndex
 from PySide6.QtMultimedia import QAudioOutput, QMediaDevices, QMediaPlayer,QAudioBufferOutput
 from modules.types import PlaylistItem
 import __main__ 
@@ -152,14 +152,25 @@ class PlaylistWidget(QTableWidget):
     """Кастомная таблица с поддержкой блокировки строк"""
     def __init__(self, rows=None, cols=None, parent=None):
         super().__init__(rows, cols, parent)
-        self.overlays = {} # Словарь для хранения оверлеев {row_index: overlay_widget}
+        self.overlays = {}
         
-        # Обновляем позиции оверлеев при прокрутке
+        self._next_safe_id = 1
+        self._mem_to_safe_id = {} # id памяти -> безопасный маленький ID
+        self._item_row_map = {}
+
         self.verticalScrollBar().valueChanged.connect(self.update_overlays_position)
         self.horizontalScrollBar().valueChanged.connect(self.update_overlays_position)
 
-        self.playlist=[]
+        self.playlist = []
         self.current_index: Optional[int] = None
+
+        # --- Drag & Drop ---
+        self.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDropIndicatorShown(True)
+        self.setDragDropMode(QAbstractItemView.InternalMove)
 
     def setPlaylist(self,playlist):
         self.playlist=playlist
@@ -172,6 +183,16 @@ class PlaylistWidget(QTableWidget):
 
 
     def update_row(self, row: int, item: PlaylistItem) -> None:
+        # Генерируем маленький ID, если видим элемент впервые
+        mem_id = id(item)
+        if mem_id not in self._mem_to_safe_id:
+            self._mem_to_safe_id[mem_id] = self._next_safe_id
+            self._next_safe_id += 1
+            
+        # Запоминаем строку по маленькому ID
+        safe_id = self._mem_to_safe_id[mem_id]
+        self._item_row_map[safe_id] = row
+        
         artist = item.uploader or "Unknown artist"
         track_item = QTableWidgetItem(f"{item.title}\n{artist}")
         track_item.setData(Qt.UserRole, item.page_url)
@@ -224,6 +245,25 @@ class PlaylistWidget(QTableWidget):
         super().resizeEvent(event)
         self.update_overlays_position()
 
+    def link_dynamic_item(self, row: int):
+        if 0 <= row < len(self.playlist):
+            # Возвращаем наш маленький безопасный ID (например, 15)
+            return self._mem_to_safe_id[id(self.playlist[row])]
+        return None
+
+    def get_dynamic_item(self, row_address): # спасибо ебаной иишке, я бы эту хуйню сам не смог
+        if row_address is None:
+            return None
+            
+        row = self._item_row_map.get(row_address)
+        
+        if row is not None and row < len(self.playlist):
+            # Проверяем, что по этой строке всё ещё лежит тот самый элемент
+            if self._mem_to_safe_id.get(id(self.playlist[row])) == row_address:
+                return row
+
+        return None
+
     def setItemLoading(self, row, is_loading):
         """Включает или выключает режим загрузки для конкретной строки"""
         # Блокируем или разблокируем ячейки в строке
@@ -254,14 +294,12 @@ class PlaylistWidget(QTableWidget):
 
     def clearPlaylistView(self):
         """Полностью очищает плейлист и удаляет все оверлеи"""
-        # 1. Безопасно удаляем все виджеты оверлеев из памяти
         for overlay in self.overlays.values():
             overlay.deleteLater()
         
-        # 2. Очищаем словарь, чтобы не осталось ссылок на удаленные объекты
         self.overlays.clear()
-        
-        # 3. Удаляем все строки из таблицы
+        self._mem_to_safe_id.clear()
+        self._item_row_map.clear()
         self.setRowCount(0)
 
     def update_overlays_position(self):
@@ -279,6 +317,128 @@ class PlaylistWidget(QTableWidget):
             else:
                 # Если строка ушла за пределы видимости (скролл), скрываем оверлей
                 overlay.hide()
+
+    def dropEvent(self, event):
+        if event.source() is not self:
+            return super().dropEvent(event)
+
+        selected_rows = sorted(set(idx.row() for idx in self.selectedIndexes()))
+        if not selected_rows:
+            event.ignore()
+            return
+        source_row = selected_rows[0]
+
+        pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+        drop_row = self.indexAt(pos).row()
+        if drop_row == -1:
+            drop_row = self.rowCount() - 1
+
+        indicator = self.dropIndicatorPosition()
+        if indicator == QAbstractItemView.BelowItem:
+            drop_row += 1
+        elif indicator == QAbstractItemView.OnViewport:
+            drop_row = self.rowCount() - 1
+
+        if drop_row > source_row:
+            drop_row -= 1
+        drop_row = max(0, min(drop_row, len(self.playlist) - 1))
+
+        # Важно: запрещаем Qt самому доделывать "move" на уровне модели —
+        # именно это добавляло лишнюю/пустую строку после нашего ручного переноса.
+        event.setDropAction(Qt.IgnoreAction)
+        event.accept()
+
+        if drop_row == source_row:
+            return
+
+        self._move_row(source_row, drop_row)
+
+
+    def _move_row(self, source_row: int, target_row: int) -> None:
+        """Переставляет элемент в self.playlist и обновляет только затронутый диапазон строк."""
+        item = self.playlist.pop(source_row)
+        self.playlist.insert(target_row, item)
+
+        lo, hi = sorted((source_row, target_row))
+
+        def remap(old_row: int) -> int:
+            if old_row == source_row:
+                return target_row
+            if source_row < old_row <= target_row:
+                return old_row - 1
+            if target_row <= old_row < source_row:
+                return old_row + 1
+            return old_row
+
+        if self.current_index is not None:
+            self.current_index = remap(self.current_index)
+
+        if self.overlays:
+            self.overlays = {remap(row): ov for row, ov in self.overlays.items()}
+
+        # Перерисовываем ТОЛЬКО диапазон между source и target,
+        # а не весь плейлист — иначе на 500+ треках это заметно тормозит.
+        self.setUpdatesEnabled(False)
+        try:
+            for row in range(lo, hi + 1):
+                self.update_row(row, self.playlist[row])
+        finally:
+            self.setUpdatesEnabled(True)
+
+        self.selectRow(target_row)
+        self.update_overlays_position()
+
+    def remove_row(self, row: int) -> None:
+        """Безопасно удаляет строку по ее индексу."""
+        if row < 0 or row >= len(self.playlist):
+            return
+
+        # 1. Удаляем оверлей текущей строки, если он был
+        if row in self.overlays:
+            overlay = self.overlays.pop(row)
+            overlay.deleteLater()
+
+        # 2. Извлекаем элемент из списка данных
+        removed_item = self.playlist.pop(row)
+
+        # Удаляем его из карты ссылок
+        mem_id = id(removed_item)
+        if hasattr(self, "_mem_to_safe_id"):
+            safe_id = self._mem_to_safe_id.pop(mem_id, None)
+            if safe_id:
+                self._item_row_map.pop(safe_id, None)
+        else:
+            self._item_row_map.pop(mem_id, None)
+
+        # 3. Удаляем визуальную строку из таблицы Qt
+        self.removeRow(row)
+
+        # 4. Сдвигаем оверлеи загрузки для всех последующих строк на -1
+        if self.overlays:
+            self.overlays = {
+                (r - 1 if r > row else r): ov for r, ov in self.overlays.items()
+            }
+
+        # 5. Обновляем карту _item_row_map ТОЛЬКО для оставшихся сдвинутых элементов
+        # (это занимает <1 мс даже для 9999 элементов)
+        for r in range(row, len(self.playlist)):
+            item = self.playlist[r]
+            item_key = (
+                self._mem_to_safe_id[id(item)]
+                if hasattr(self, "_mem_to_safe_id")
+                else id(item)
+            )
+            self._item_row_map[item_key] = r
+
+        # 6. Корректируем индекс текущего воспроизводимого трека
+        if self.current_index is not None:
+            if self.current_index == row:
+                self.current_index = None  # Воспроизводимый трек был удален
+            elif self.current_index > row:
+                self.current_index -= 1  # Трек сдвинулся выше
+
+        # 7. Пересчитываем визуальное положение оставшихся оверлеев
+        self.update_overlays_position()
 
     @staticmethod
     def format_time(milliseconds: int) -> str:

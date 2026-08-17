@@ -37,7 +37,7 @@ from PySide6.QtCore import (
     QSize,
     Property,
     QEasingCurve,
-    QEvent,
+    QEvent
 )
 from PySide6.QtMultimedia import QAudioBufferOutput, QAudioFormat, QAudioOutput, QMediaPlayer
 from PySide6.QtGui import QBrush, QColor, QLinearGradient, QPainter, QPixmap,QAction,QIcon
@@ -648,7 +648,7 @@ class PlayerWindow(QMainWindow,AudioController):
         menu.addSeparator()
 
         action5 = QAction("Удалить", self)
-        action5.triggered.connect(lambda: self.remove_index(index.row()))
+        action5.triggered.connect(lambda: self.table.remove_row(index.row()))
         menu.addAction(action5)
 
         # 5. Показываем меню в точке клика
@@ -941,8 +941,10 @@ class PlayerWindow(QMainWindow,AudioController):
             return
 
         self.table.setItemLoading(index,True)
-        self.resolverManager.addTask(index,self.plugin_loader.find_resolver(
-            index,
+        link_index=self.table.link_dynamic_item(index)
+
+        self.resolverManager.addTask(link_index,self.plugin_loader.find_resolver(
+            link_index,
             self.playlist[index],
             self.resolve_signals,
             self.cookie_browser.currentData() or "",
@@ -1019,6 +1021,7 @@ class PlayerWindow(QMainWindow,AudioController):
 
     def on_resolved(self, index: int, item: PlaylistItem) -> None:
         self.resolverManager.resolving_indexes.pop(index,None)
+        index=self.table.get_dynamic_item(index)
         auto_play = self.resolve_autoplay
         if index < 0 or index >= len(self.playlist):
             return
@@ -1050,6 +1053,7 @@ class PlayerWindow(QMainWindow,AudioController):
         details: str = "",
     ) -> None:
         self.resolverManager.resolving_indexes.pop(index,None)
+        index=self.table.get_dynamic_item(index)
         if not(index==None):
             self.table.setItemLoading(index,False)
             if(index==self.resolve_autoplay):

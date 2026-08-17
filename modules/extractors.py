@@ -10,11 +10,12 @@ from .types import *
 import re,time
 
 
+
 class ResolveSignals(QObject):
-    resolved = Signal(int, object)
+    resolved = Signal(object, object)
     parsed = Signal(int, object, str)
     status = Signal(str)
-    failed = Signal(int, str, str)
+    failed = Signal(object, str, str)
 
 
 def parse_youtube_link(url):
