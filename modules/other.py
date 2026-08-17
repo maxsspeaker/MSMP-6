@@ -2,11 +2,12 @@ import random,hashlib
 import os,sys
 from PySide6.QtWidgets import (
     QApplication, QWidget, QPushButton, QVBoxLayout,QTableWidget, QProgressBar,
-    QHBoxLayout, QGraphicsOpacityEffect, QLabel, QGraphicsBlurEffect,QComboBox,QFrame,QStyleOptionViewItem,QListView,QStyledItemDelegate, QStyle,QMenu, QStyleOption
+    QHBoxLayout, QGraphicsOpacityEffect, QLabel, QGraphicsBlurEffect,QComboBox,QFrame,QStyleOptionViewItem,QListView,QStyledItemDelegate, QStyle,QMenu, QStyleOption,QTableWidgetItem
 )
-from PySide6.QtGui import QColor,QPixmap, QPainter, QLinearGradient, QImage,QPalette, QPen, QBrush,QAction
+from PySide6.QtGui import QColor,QPixmap, QPainter, QLinearGradient, QImage,QPalette, QPen, QBrush,QAction,QFont
 from PySide6.QtCore import QPropertyAnimation, QRect, QEasingCurve, Qt, Signal,QObject, QProcess,QParallelAnimationGroup,QSize, Slot
 from PySide6.QtMultimedia import QAudioOutput, QMediaDevices, QMediaPlayer,QAudioBufferOutput
+from modules.types import PlaylistItem
 import __main__ 
 import re
 import subprocess
@@ -156,6 +157,68 @@ class PlaylistWidget(QTableWidget):
         # Обновляем позиции оверлеев при прокрутке
         self.verticalScrollBar().valueChanged.connect(self.update_overlays_position)
         self.horizontalScrollBar().valueChanged.connect(self.update_overlays_position)
+
+        self.playlist=[]
+        self.current_index: Optional[int] = None
+
+    def setPlaylist(self,playlist):
+        self.playlist=playlist
+        for row, item in enumerate(self.playlist):
+            self.insertRow(row)
+            self.update_row(row, item)
+
+        if self.current_index is not None and self.current_index < len(self.playlist):
+            self.selectRow(self.current_index)
+
+
+    def update_row(self, row: int, item: PlaylistItem) -> None:
+        artist = item.uploader or "Unknown artist"
+        track_item = QTableWidgetItem(f"{item.title}\n{artist}")
+        track_item.setData(Qt.UserRole, item.page_url)
+        length_item = QTableWidgetItem(self.format_time(item.duration * 1000))
+        self.setItem(row, 0, track_item)
+        self.setItem(row, 1, length_item)
+        self.setRowHeight(row, 44)
+        self.apply_row_style(row)
+
+    def apply_row_style(self, row: int) -> None:
+        if row < 0 or row >= len(self.playlist):
+            return
+
+        item = self.playlist[row]
+        is_current = row == self.current_index
+        if is_current:
+            background = QBrush(QColor("#1e2a33"))
+        elif item.unavailable:
+            background = QBrush(QColor("#0b0b0b"))
+        elif not item.stream_url:
+            background = QBrush(QColor("#0f0f0f"))
+        else:
+            background = QBrush() 
+
+        if item.unavailable:
+            foreground = QBrush(QColor("#5f6368"))
+
+        elif not item.stream_url:
+            foreground = QBrush(QColor("#a5a5a5"))
+        else:
+            foreground = QBrush(QColor("#f2f2f2"))
+
+        for column in range(self.columnCount()):
+            table_item = self.item(row, column)
+            if table_item is None:
+                continue
+            font = table_item.font()
+            font.setWeight(QFont.DemiBold if is_current and not item.unavailable else QFont.Normal)
+            table_item.setFont(font)
+            table_item.setForeground(foreground)
+            table_item.setBackground(background)
+            if item.unavailable and item.load_error:
+                table_item.setToolTip(item.load_error)
+            elif is_current:
+                table_item.setToolTip("Now playing")
+            else:
+                table_item.setToolTip("")
         
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -216,6 +279,15 @@ class PlaylistWidget(QTableWidget):
             else:
                 # Если строка ушла за пределы видимости (скролл), скрываем оверлей
                 overlay.hide()
+
+    @staticmethod
+    def format_time(milliseconds: int) -> str:
+        seconds = max(0, milliseconds // 1000)
+        minutes, seconds = divmod(seconds, 60)
+        hours, minutes = divmod(minutes, 60)
+        if hours:
+            return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+        return f"{minutes}:{seconds:02d}"
 
 
 

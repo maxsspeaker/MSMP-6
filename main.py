@@ -40,7 +40,7 @@ from PySide6.QtCore import (
     QEvent,
 )
 from PySide6.QtMultimedia import QAudioBufferOutput, QAudioFormat, QAudioOutput, QMediaPlayer
-from PySide6.QtGui import QBrush, QColor, QFont, QLinearGradient, QPainter, QPixmap,QAction,QIcon
+from PySide6.QtGui import QBrush, QColor, QLinearGradient, QPainter, QPixmap,QAction,QIcon
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest
 from PySide6.QtWidgets import (
     QApplication,
@@ -670,7 +670,6 @@ class PlayerWindow(QMainWindow,AudioController):
         self.plugin_loader.load_all(context=self)
 
         self.playlist: list[PlaylistItem] = []
-        self.current_index: Optional[int] = None
         self.pending_position = 0
         self.restart_attempts = 0
         self.user_dragging = False
@@ -729,7 +728,7 @@ class PlayerWindow(QMainWindow,AudioController):
         self.buffer_progress_timer.timeout.connect(self.poll_buffer_progress)
 
         # ── Построение UI через движок ─────────────────────────────────────
-        _ui_xml_path = os.path.join(os.path.dirname(__file__), f"skins/{self.SkinName}/index.xml")
+        _ui_xml_path = os.path.join(os.path.dirname(__file__), f"skins/{self.SkinName}")
 
         self._engine = UIEngine(context=self, default_spacing=0, default_margin=0)
         container = self._engine.build_file(_ui_xml_path)
@@ -805,18 +804,6 @@ class PlayerWindow(QMainWindow,AudioController):
         self.set_cover_placeholder()
 
 
-        # ── Иконки кнопок управления ──────────────────────────────────────
-        for btn, icon_file in (
-            (self.prev_button,    "resources/previous.svg"),
-            (self.stop_button,    "resources/stop.svg"),
-            (self.play_button,    "resources/play.svg"),
-            (self.pause_button,   "resources/pause.svg"),
-            (self.next_button,    "resources/next.svg"),
-            (self.restart_button, "resources/reload-audio.svg"),
-        ):
-            if(btn):
-                btn.setIcon(QIcon(icon_file))
-
         self.mode_button.setIcon(QIcon(self.PLAY_MODES_icons[self.play_mode_index]))
 
         # ── Донастройка cookie_browser (userData для элементов) ───────────
@@ -843,6 +830,7 @@ class PlayerWindow(QMainWindow,AudioController):
         self.position_slider.sliderMoved.connect(self.on_seek_preview)
 
         # ── Донастройка таблицы ───────────────────────────────────────────
+        self.table.playlist = self.playlist
         self.table.setColumnCount(2)
         self.table.setHorizontalHeaderLabels(["Track", "Length"])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
@@ -933,7 +921,7 @@ class PlayerWindow(QMainWindow,AudioController):
         row = len(self.playlist)
         self.playlist.append(PlaylistItem(page_url=url,source_id=source_id))
         self.table.insertRow(row)
-        self.set_row(row, self.playlist[row])
+        self.table.update_row(row, self.playlist[row])
         self.status_label.setText("Resolving stream...")
         self.emit_mpris_properties_changed("org.mpris.MediaPlayer2.Player", {
             "CanGoNext": bool(self.playlist),
@@ -990,7 +978,7 @@ class PlayerWindow(QMainWindow,AudioController):
         self.stop_playback()
         self.playlist_title = playlist_title or "Jam playlist"
         self.playlist = parsed_items
-        self.current_index = None
+        self.table.current_index = None
         self.pending_position = 0
         self.restart_attempts = 0
         self.resolverManager.clear()
@@ -1045,10 +1033,10 @@ class PlayerWindow(QMainWindow,AudioController):
 
         self.playlist[index] = item
         self.table.setItemLoading(index,False)
-        self.set_row(index, item)
+        self.table.update_row(index, item)
         self.status_label.setText(f"Resolved: {item.title}")
 
-        if self.current_index == index:
+        if self.table.current_index == index:
             self.update_current_metadata(item)
 
         if not auto_play == None:
@@ -1073,7 +1061,7 @@ class PlayerWindow(QMainWindow,AudioController):
                 item.unavailable = is_video_unavailable_error(error)
                 if item.title == "Loading...":
                     item.title = "Video unavailable" if item.unavailable else "Resolve failed"
-                self.set_row(index, item)
+                self.table.update_row(index, item)
                 title = item.page_url
             else:
                 title = "item"
@@ -1099,85 +1087,39 @@ class PlayerWindow(QMainWindow,AudioController):
             self.error_boxes.remove(box)
         box.deleteLater()
 
-    def set_row(self, row: int, item: PlaylistItem) -> None:
-        artist = item.uploader or "Unknown artist"
-        track_item = QTableWidgetItem(f"{item.title}\n{artist}")
-        track_item.setData(Qt.UserRole, item.page_url)
-        length_item = QTableWidgetItem(self.format_time(item.duration * 1000))
-        self.table.setItem(row, 0, track_item)
-        self.table.setItem(row, 1, length_item)
-        self.table.setRowHeight(row, 44)
-        self.apply_row_style(row)
 
-    def apply_row_style(self, row: int) -> None:
-        if row < 0 or row >= len(self.playlist):
-            return
-
-        item = self.playlist[row]
-        is_current = row == self.current_index
-        if is_current:
-            background = QBrush(QColor("#1e2a33"))
-        elif item.unavailable:
-            background = QBrush(QColor("#0b0b0b"))
-        elif not item.stream_url:
-            background = QBrush(QColor("#0f0f0f"))
-        else:
-            background = QBrush() 
-
-        if item.unavailable:
-            foreground = QBrush(QColor("#5f6368"))
-
-        elif not item.stream_url:
-            foreground = QBrush(QColor("#a5a5a5"))
-        else:
-            foreground = QBrush(QColor("#f2f2f2"))
-
-        for column in range(self.table.columnCount()):
-            table_item = self.table.item(row, column)
-            if table_item is None:
-                continue
-            font = table_item.font()
-            font.setWeight(QFont.DemiBold if is_current and not item.unavailable else QFont.Normal)
-            table_item.setFont(font)
-            table_item.setForeground(foreground)
-            table_item.setBackground(background)
-            if item.unavailable and item.load_error:
-                table_item.setToolTip(item.load_error)
-            elif is_current:
-                table_item.setToolTip("Now playing")
-            else:
-                table_item.setToolTip("")
 
     def refresh_row_style(self, row: Optional[int]) -> None:
         if row is not None and 0 <= row < len(self.playlist):
-            self.apply_row_style(row)
+            self.table.apply_row_style(row)
 
     def refresh_table(self) -> None:
         self.table.clearPlaylistView()
-        for row, item in enumerate(self.playlist):
-            self.table.insertRow(row)
-            self.set_row(row, item)
+        self.table.setPlaylist(self.playlist)
+        #for row, item in enumerate(self.playlist):
+        #    self.table.insertRow(row)
+        #    self.table.update_row(row, item)
 
-        if self.current_index is not None and self.current_index < len(self.playlist):
-            self.table.selectRow(self.current_index)
+        #if self.table.current_index is not None and self.table.current_index < len(self.playlist):
+        #    self.table.selectRow(self.table.current_index)
 
     def play_selected_or_current(self) -> None:
         selected = self.table.currentRow()
 
-        if self.current_index is not None and self.player.playbackState() == QMediaPlayer.PausedState:
+        if self.table.current_index is not None and self.player.playbackState() == QMediaPlayer.PausedState:
             self.player.play()
             self.start_mpris_position_updates()
             self.sync_mpris_position()
             self.set_mpris_playback_status("Playing")
             return
 
-        if selected >= 0 and selected != self.current_index:
+        if selected >= 0 and selected != self.table.current_index:
             self.play_index(selected)
             return
 
-        if self.current_index is not None:
+        if self.table.current_index is not None:
             if(self.db):
-                self.db.increment_plays(self.playlist[self.current_index])
+                self.db.increment_plays(self.playlist[self.table.current_index])
             self.player.play()
             self.start_mpris_position_updates()
             self.sync_mpris_position()
@@ -1233,8 +1175,8 @@ class PlayerWindow(QMainWindow,AudioController):
 
     def start_playback(self, index: int) -> None:
         item = self.playlist[index]
-        previous_index = self.current_index
-        self.current_index = index
+        previous_index = self.table.current_index
+        self.table.current_index = index
         self.table.selectRow(index)
         self.refresh_row_style(previous_index)
         self.refresh_row_style(index)
@@ -1282,7 +1224,7 @@ class PlayerWindow(QMainWindow,AudioController):
         if not self.playlist:
             return
 
-        if self.current_index is None:
+        if self.table.current_index is None:
             self.play_index(0)
             return
 
@@ -1296,11 +1238,11 @@ class PlayerWindow(QMainWindow,AudioController):
         if not self.playlist:
             return
 
-        if self.current_index is None:
+        if self.table.current_index is None:
             self.play_index(0)
             return
 
-        previous_index = (self.current_index - 1) % len(self.playlist)
+        previous_index = (self.table.current_index - 1) % len(self.playlist)
         self.play_index(previous_index)
 
     def remove_selected(self) -> None:
@@ -1311,11 +1253,11 @@ class PlayerWindow(QMainWindow,AudioController):
         del self.playlist[row]
         self.table.removeRow(row)
 
-        if self.current_index == row:
+        if self.table.current_index == row:
             self.stop_playback()
-            self.current_index = None
-        elif self.current_index is not None and row < self.current_index:
-            self.current_index -= 1
+            self.table.current_index = None
+        elif self.table.current_index is not None and row < self.table.current_index:
+            self.table.current_index -= 1
         self.refresh_table()
 
     def remove_index(self,index:int) -> None:
@@ -1325,11 +1267,11 @@ class PlayerWindow(QMainWindow,AudioController):
         del self.playlist[index]
         self.table.removeRow(index)
 
-        if self.current_index == index:
+        if self.table.current_index == index:
             self.stop_playback()
-            self.current_index = None
-        elif self.current_index is not None and index < self.current_index:
-            self.current_index -= 1
+            self.table.current_index = None
+        elif self.table.current_index is not None and index < self.table.current_index:
+            self.table.current_index -= 1
         self.refresh_table()
 
     def set_metaData(self,time_possition=None,time_end=None,track_title=None,artist=None,album=None):
@@ -1361,7 +1303,7 @@ class PlayerWindow(QMainWindow,AudioController):
     def clear_playlist(self) -> None:
         self.stop_playback()
         self.playlist.clear()
-        self.current_index = None
+        self.table.current_index = None
         self.table.clearPlaylistView()
         self.position_slider.setRange(0, 0)
         self.set_metaData(
@@ -1393,10 +1335,10 @@ class PlayerWindow(QMainWindow,AudioController):
 
         self.playlist[row], self.playlist[target] = self.playlist[target], self.playlist[row]
 
-        if self.current_index == row:
-            self.current_index = target
-        elif self.current_index == target:
-            self.current_index = row
+        if self.table.current_index == row:
+            self.table.current_index = target
+        elif self.table.current_index == target:
+            self.table.current_index = row
 
         self.refresh_table()
         self.table.selectRow(target)
@@ -1436,7 +1378,7 @@ class PlayerWindow(QMainWindow,AudioController):
                 data = json.load(file)
 
             self.stop_playback()
-            self.current_index = None
+            self.table.current_index = None
             self.playlist = self.from_playlist_data(data)
             self.refresh_table()
             self.status_label.setText(f"Playlist loaded: {path}")
@@ -1634,7 +1576,7 @@ class PlayerWindow(QMainWindow,AudioController):
             self.mpris_position_timer.stop()
 
     def sync_mpris_position(self, position_ms: Optional[int] = None) -> None:
-        if self.current_index is None:
+        if self.table.current_index is None:
             return
 
         if position_ms is None:
@@ -1682,14 +1624,14 @@ class PlayerWindow(QMainWindow,AudioController):
 
     def mpris_metadata(self) -> dict:
         item = None
-        if self.current_index is not None and 0 <= self.current_index < len(self.playlist):
-            item = self.playlist[self.current_index]
+        if self.table.current_index is not None and 0 <= self.table.current_index < len(self.playlist):
+            item = self.playlist[self.table.current_index]
 
         if item is None:
             return MprisServer.empty_metadata()
 
         metadata = {
-            "mpris:trackid": Variant("o", f"/org/mpris/MediaPlayer2/Track/{self.current_index}"),
+            "mpris:trackid": Variant("o", f"/org/mpris/MediaPlayer2/Track/{self.table.current_index}"),
             "xesam:title": Variant("s", item.title or "Unknown track"),
             "xesam:artist": Variant("as", [item.uploader] if item.uploader else []),
             "xesam:album": Variant("s", item.album or self.playlist_title or ""),
@@ -1702,16 +1644,16 @@ class PlayerWindow(QMainWindow,AudioController):
         return metadata
 
     def next_index_after_current(self) -> Optional[int]:
-        if self.current_index is None or not self.playlist:
+        if self.table.current_index is None or not self.playlist:
             return None
 
         mode = self.PLAY_MODES[self.play_mode_index]
         if mode == "One":
-            return self.current_index
+            return self.table.current_index
         if mode == "Rnd":
             return random.randrange(len(self.playlist))
 
-        next_index = self.current_index + 1
+        next_index = self.table.current_index + 1
         if next_index < len(self.playlist):
             return next_index
         if mode == "All":
@@ -1738,8 +1680,8 @@ class PlayerWindow(QMainWindow,AudioController):
             self.stop_buffer_progress_monitor()
             self.update_buffer_progress(0.0)
 
-        if self.current_index is not None and status in ready_states:
-            self.request_waveform_generation(self.current_index)
+        if self.table.current_index is not None and status in ready_states:
+            self.request_waveform_generation(self.table.current_index)
 
         if status != QMediaPlayer.EndOfMedia:
             return
@@ -1751,17 +1693,17 @@ class PlayerWindow(QMainWindow,AudioController):
             self.set_mpris_playback_status("Stopped")
 
     def restart_current_stream(self) -> None:
-        if self.current_index is None:
+        if self.table.current_index is None:
             return
 
         self.pending_position = self.player.position()
         self.update_buffer_progress(0.0)
-        self.playlist[self.current_index].stream_url = ""
+        self.playlist[self.table.current_index].stream_url = ""
         self.status_label.setText("Restarting stream...")
-        self.resolve_item(self.current_index, auto_play=True)
+        self.resolve_item(self.table.current_index, auto_play=True)
 
     def on_player_error(self, _error, error_string: str) -> None:
-        if self.current_index is None:
+        if self.table.current_index is None:
             return
 
         if self.restart_attempts >= self.MAX_RESTARTS:
@@ -1776,8 +1718,8 @@ class PlayerWindow(QMainWindow,AudioController):
         self.status_label.setText(
             f"Stream error, restarting ({self.restart_attempts}/{self.MAX_RESTARTS})..."
         )
-        self.playlist[self.current_index].stream_url = ""
-        failed_index = self.current_index
+        self.playlist[self.table.current_index].stream_url = ""
+        failed_index = self.table.current_index
         QTimer.singleShot(500, lambda: self.resolve_item(failed_index, auto_play=True))
 
     def on_playback_state_changed(self, state: QMediaPlayer.PlaybackState) -> None:
@@ -1813,8 +1755,8 @@ class PlayerWindow(QMainWindow,AudioController):
         if(progress==0.25):
             return
         self.position_slider.set_buffered_ratio(progress)
-        if self.current_index is not None and progress >= 0.99:
-            self.request_waveform_generation(self.current_index)
+        if self.table.current_index is not None and progress >= 0.99:
+            self.request_waveform_generation(self.table.current_index)
 
     def start_buffer_progress_monitor(self) -> None:
         if not self.buffer_progress_timer.isActive():
@@ -1844,7 +1786,7 @@ class PlayerWindow(QMainWindow,AudioController):
             if cached and not item.waveform:
                 item.waveform = cached
                 item.waveform_ready = True
-                if index == self.current_index:
+                if index == self.table.current_index:
                     self.position_slider.set_waveform(cached)
             return
 
@@ -1878,7 +1820,7 @@ class PlayerWindow(QMainWindow,AudioController):
         item.waveform_ready = True
         self.waveform_cache[item.page_url] = cleaned
 
-        if index == self.current_index:
+        if index == self.table.current_index:
             self.position_slider.set_waveform(cleaned)
 
     def on_waveform_failed(self, index: int, error: str) -> None:

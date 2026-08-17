@@ -71,12 +71,12 @@
 
                     <!-- левый распор -->
 
-                    <qpushbutton id="prev_button"    connect="play_previous" />
-                    <qpushbutton id="stop_button"    connect="stop_playback" />
-                    <qpushbutton id="play_button"    connect="play_selected_or_current" />
-                    <qpushbutton id="pause_button"   connect="pause_playback" />
-                    <qpushbutton id="next_button"    connect="play_next" />
-                    <qpushbutton id="restart_button" connect="restart_current_stream" />
+                    <qpushbutton id="prev_button"    icon="resources/previous.svg"     connect="play_previous" />
+                    <qpushbutton id="stop_button"    icon="resources/stop.svg"         connect="stop_playback" />
+                    <qpushbutton id="play_button"    icon="resources/play.svg"         connect="play_selected_or_current" />
+                    <qpushbutton id="pause_button"   icon="resources/pause.svg"        connect="pause_playback" />
+                    <qpushbutton id="next_button"    icon="resources/next.svg"         connect="play_next" />
+                    <qpushbutton id="restart_button" icon="resources/reload-audio.svg" connect="restart_current_stream" />
 
                     <!-- правый распор — в 3 раза шире левого, прижимает кнопки к центру -->
                     <qwidget stretch="3" />

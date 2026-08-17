@@ -63,12 +63,12 @@
 
                     <!-- левый распор -->
 
-                    <qpushbutton id="prev_button"    connect="play_previous" />
-                    <qpushbutton id="stop_button"    connect="stop_playback" />
-                    <qpushbutton id="play_button"    connect="play_selected_or_current" />
-                    <qpushbutton id="pause_button"   connect="pause_playback" />
-                    <qpushbutton id="next_button"    connect="play_next" />
-                    <qpushbutton id="restart_button" connect="restart_current_stream" />
+                    <qpushbutton class="control_buttons" id="prev_button"    icon="{internal}/resources/previous.svg"     connect="play_previous" />
+                    <qpushbutton class="control_buttons" id="stop_button"    icon="{internal}/resources/stop.svg"         connect="stop_playback" />
+                    <qpushbutton class="control_buttons" id="play_button"    icon="{internal}/resources/play.svg"         connect="play_selected_or_current" />
+                    <qpushbutton class="control_buttons" id="pause_button"   icon="{internal}/resources/pause.svg"        connect="pause_playback" />
+                    <qpushbutton class="control_buttons" id="next_button"    icon="{internal}/resources/next.svg"         connect="play_next" />
+                    <qpushbutton class="control_buttons" id="restart_button" icon="{internal}/resources/reload-audio.svg" connect="restart_current_stream" />
 
                     <!-- правый распор — в 3 раза шире левого, прижимает кнопки к центру -->
                     <qwidget stretch="3" />
@@ -76,7 +76,7 @@
                     <qlabel id="time_label" text="0:00 / 0:00"
                             style="color:#fff;" />
 
-                    <qpushbutton id="mode_button" connect="toggle_play_mode" />
+                    <qpushbutton class="control_buttons" id="mode_button" connect="toggle_play_mode" />
 
                     <qslider id="volume_slider"
                              orientation="h"

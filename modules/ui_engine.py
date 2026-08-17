@@ -62,6 +62,7 @@ ui_engine.py — XML-driven UI engine for PySide6
 
 from __future__ import annotations
 
+import os,re
 from xml.etree import ElementTree as ET
 from typing import Any, Callable
 import inspect
@@ -79,6 +80,7 @@ from PySide6.QtWidgets import (
     QLayout, QSizePolicy,QStyle
 )
 from PySide6.QtCore import Qt, QSize,QTimer
+from PySide6.QtGui import QIcon
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -270,8 +272,10 @@ class UIEngine:
         return element
 
     def build_file(self, path: str) -> QWidget:
-        """Читает XML из файла и вызывает build()."""
-        with open(path, encoding="utf-8") as fh:
+        """Читает index.xml из папки и вызывает build()."""
+        self._skin_path=path
+
+        with open(os.path.join(path, "index.xml"), encoding="utf-8") as fh:
             return self.build(fh.read())
 
     # ── Построение элемента ───────────────────────────────────────────────────
@@ -346,6 +350,8 @@ class UIEngine:
             widget.setEnabled(_bool(attrs["enabled"]))
         if "visible" in attrs:
             widget.setVisible(_bool(attrs["visible"]))
+        if "icon" in attrs:
+            self._apply_icon(widget, attrs["icon"],self._skin_path)
 
         # 6. Размеры ───────────────────────────────────────────────────────────
         if "min-width" in attrs or "min-height" in attrs:
@@ -438,6 +444,14 @@ class UIEngine:
             widget.setText(text)
         elif hasattr(widget, "setTitle"):
             widget.setTitle(text)
+
+    @staticmethod
+    def _apply_icon(widget: QWidget, icon: str, _skin_path: str) -> None:
+        if not icon:
+            return
+        if hasattr(widget, "setIcon"):
+
+            widget.setIcon(QIcon(re.sub(r"^\{internal\}", _skin_path, icon)))
 
     @staticmethod
     def _apply_specifics(widget: QWidget, attrs: dict, text: str) -> None:

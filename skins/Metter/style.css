@@ -63,6 +63,11 @@ QPushButton, QComboBox {
     qproperty-iconSize: 16px 16px; 
 }
 
+QPushButton#control_buttons{
+    padding: 4px 4px;
+    qproperty-iconSize: 24px 24px; 
+}
+
 QListView {
     background-color: #191919;
     border: none;
