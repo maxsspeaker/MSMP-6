@@ -1022,6 +1022,8 @@ class PlayerWindow(QMainWindow,AudioController):
     def on_resolved(self, index: int, item: PlaylistItem) -> None:
         self.resolverManager.resolving_indexes.pop(index,None)
         index=self.table.get_dynamic_item(index)
+        if index is None:
+            return
         auto_play = self.resolve_autoplay
         if index < 0 or index >= len(self.playlist):
             return
