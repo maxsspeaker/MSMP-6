@@ -1,4 +1,4 @@
-import json
+import json,yaml
 import logging
 import random
 import re
@@ -67,7 +67,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QToolTip
 )
-from modules.other import GradientImageLabel,FixedComboBox,SystemMenuBar,get_ffmpeg_executable,LocalSaveDir,PlaylistWidget,AudioController
+from modules.other import GradientImageLabel,FixedComboBox,SystemMenuBar,get_ffmpeg_executable,LocalSaveDir,PlaylistWidget,AudioController,LoadConfigYaml,SkinManager
 from modules.types import *
 from modules.pluginLoader import PluginLoader
 from modules.dbus import MprisServer
@@ -609,7 +609,7 @@ UIEngine.register("visualizerWindow", VisualizerWindow)
 UIEngine.register("qtablewidget", PlaylistWidget) #!!! legacy БУДЕТ УБРАНО В 6.0.4 исправьте кастомные скины!!!!
 UIEngine.register("playlistwidget", PlaylistWidget)
 
-class PlayerWindow(QMainWindow,AudioController):
+class PlayerWindow(QMainWindow,AudioController,SkinManager):
     MAX_RESTARTS = 3
     PLAY_MODES_icons = ("resources/arrow-s-right.svg", "resources/out-loop.svg", "resources/loop.svg", "resources/shuffle.svg")
     PLAY_MODES = ("Seq", "One", "All", "Rnd")
@@ -661,10 +661,16 @@ class PlayerWindow(QMainWindow,AudioController):
 
         self.setWindowIcon(QIcon("resources/MSMPicon.png"))
 
-        self.SkinName=skin
         self.events = PlayerEvents()
 
-        self.db=AudioStatsDb(db_name=os.path.join(LocalSaveDir(),"music.db"))
+        self.db = AudioStatsDb(db_name=os.path.join(LocalSaveDir(),"music.db"))
+
+        self.config=LoadConfigYaml()
+        print(self.config)
+        if not(skin=="default"):
+            self.config["skin"]=skin
+
+        print(self.config["skin"])
 
         self.plugin_loader = PluginLoader()
         self.plugin_loader.load_all(context=self)
@@ -696,8 +702,6 @@ class PlayerWindow(QMainWindow,AudioController):
         self.resolve_signals.status.connect(self.on_jam_playlist_status)
 
         self.resolve_signals.parsed.connect(self.on_jam_playlist_parsed)
-        
-     #   self.jam_signals.failed.connect(self.on_jam_playlist_failed) - legacy
 
         self._last_mpris_position_us = -1
 
@@ -728,7 +732,7 @@ class PlayerWindow(QMainWindow,AudioController):
         self.buffer_progress_timer.timeout.connect(self.poll_buffer_progress)
 
         # ── Построение UI через движок ─────────────────────────────────────
-        _ui_xml_path = os.path.join(os.path.dirname(__file__), f"skins/{self.SkinName}")
+        _ui_xml_path = os.path.join(os.path.dirname(__file__), f"skins/{self.config["skin"]}")
 
         self._engine = UIEngine(context=self, default_spacing=0, default_margin=0)
         container = self._engine.build_file(_ui_xml_path)
@@ -768,6 +772,12 @@ class PlayerWindow(QMainWindow,AudioController):
         file_menu = self.MainMenuBar.add_menu("Menu")
         file_menu.addAction("About",lambda:AboutWindow(self).exec())
         self.PlguinMenu=self.MainMenuBar.add_submenu(file_menu, "Plugins")
+
+        setup_menu=self.MainMenuBar.add_menu("Settings")
+        skin_menu=self.MainMenuBar.add_submenu(setup_menu, "Skins", hide_if_empty=False)
+
+        for skin in sorted(os.listdir(os.path.join(os.path.dirname(__file__), "skins"))):
+           skin_menu.addAction(skin, lambda s=skin: self.set_skin(s)) 
         
         self.PluginMenu=self.PlguinMenu #!!! legacy БУДЕТ УБРАНО В 6.0.4 исправьте кастомные скины!!!
 
@@ -799,8 +809,6 @@ class PlayerWindow(QMainWindow,AudioController):
             artist="",
             album=""
             )
-
-        # ── Донастройка cover_label ────────────────────────────────────────
         self.set_cover_placeholder()
 
 
@@ -810,6 +818,8 @@ class PlayerWindow(QMainWindow,AudioController):
         cookie_data = ["", "firefox", "chrome", "chromium", "brave", "edge"]
         for i, data in enumerate(cookie_data):
             self.cookie_browser.setItemData(i, data)
+        self.cookie_browser.setCurrentIndex(self.config["cookies"]["selected"])
+        self.cookie_browser.currentIndexChanged.connect(self.change_cookie_browser)
 
         # ── Дополнительный connect для url_input (returnPressed) ──────────
         self.url_input.returnPressed.connect(self.add_url)
@@ -886,6 +896,9 @@ class PlayerWindow(QMainWindow,AudioController):
         
         return super().eventFilter(obj, event)
 
+    def change_cookie_browser(self):
+        self.config["cookies"]={"browser":self.cookie_browser.currentData() or "","selected":self.cookie_browser.currentIndex()}
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if(self.cover_background):
@@ -947,7 +960,7 @@ class PlayerWindow(QMainWindow,AudioController):
             link_index,
             self.playlist[index],
             self.resolve_signals,
-            self.cookie_browser.currentData() or "",
+            self.config["cookies"]["browser"],
             type=type
         ))
 
@@ -1808,7 +1821,7 @@ class PlayerWindow(QMainWindow,AudioController):
             item.stream_url,
             item.duration,
             self.waveform_signals,
-            self.cookie_browser.currentData() or "",
+            self.config["cookies"]["browser"],
         )
         task.setAutoDelete(True)
         self.thread_pool.start(task)
@@ -1948,12 +1961,19 @@ class PlayerWindow(QMainWindow,AudioController):
         self.on_volume_changed(value)
 
     def apply_style(self) -> None:
-        with open(os.path.join(os.path.dirname(__file__), f"skins/{self.SkinName}/style.css")) as f:
+        with open(os.path.join(os.path.dirname(__file__), f"skins/{self.config["skin"]}/style.css")) as f:
             self.setStyleSheet(f.read())
 
     def closeEvent(self, event) -> None:
         if(self.db):
             self.db.close()
+
+
+        try:
+            with open(os.path.join(LocalSaveDir(),"config","config.yml"), "w", encoding="utf-8") as file:
+                yaml.dump(self.config, file, default_flow_style=False, allow_unicode=True)
+        except OSError as exc:
+            print(exc)
 
         self.events.on_app_closing.emit()
 
@@ -1963,7 +1983,7 @@ class PlayerWindow(QMainWindow,AudioController):
             with open(os.path.join(LocalSaveDir(),"autosave.plmsmpsbox"), "w", encoding="utf-8") as file:
                 json.dump(data, file, ensure_ascii=False, indent=2)
         except OSError as exc:
-            pass
+            print(exc)
 
         self.mpris_server.stop()
         super().closeEvent(event)
@@ -2044,7 +2064,7 @@ def main() -> int:
     parser.add_argument(
         '-s', '--skin', 
         type=str, 
-        default="Foxyglass",
+        default="default",
         help="Установить скин из папки skins"
     )
     

@@ -12,7 +12,7 @@ import __main__
 import re
 import subprocess
 import shutil
-import json
+import json,yaml
 
 class GradientImageLabel(QLabel):
     """Супер пупер навороченое отображение картинки, спиженный с моего Minecraft лаунчера"""
@@ -123,6 +123,13 @@ class AudioController():
         default_device = QMediaDevices.defaultAudioOutput()
         self.audio_output.setDevice(default_device)
         print(f"Устройство вывода установлено на: {default_device.description()}")
+
+
+class SkinManager():
+
+    def set_skin(self,skin):
+        print(skin)
+        self.config["skin"]=skin
 
 class LoadingOverlay(QWidget):
     """Виджет-оверлей, который будет накладываться поверх строки"""
@@ -650,12 +657,21 @@ def LocalSaveDir():
 
 
 def LoadConfigYaml():
-    with open("config.yaml", "r", encoding="utf-8") as f:
-        try:
-            data = yaml.safe_load(f)
-            print(data)
-        
-        except yaml.YAMLError as exc:
-            print(f"Ошибка чтения файла: {exc}") 
+    if(os.path.isfile(os.path.join(LocalSaveDir(),"config","config.yml"))):
+        with open(os.path.join(LocalSaveDir(),"config","config.yml"), "r", encoding="utf-8") as file:
+            config = yaml.safe_load(file)
+        print(config)
+        return config
+    else:
+        config = {
+            "cookies":{"browser":"firefox","selected":0},
+            "skin":"Foxyglass"
+        }
+
+        os.makedirs(os.path.join(LocalSaveDir(),"config"), exist_ok=True)
+        with open(os.path.join(LocalSaveDir(),"config","config.yml"), "w", encoding="utf-8") as file:
+            yaml.dump(config, file, default_flow_style=False, allow_unicode=True)
+
+        return config
 
 #....
