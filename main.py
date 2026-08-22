@@ -937,7 +937,7 @@ class PlayerWindow(QMainWindow,AudioController):
         if(auto_play):
             self.resolve_autoplay = index
 
-        if self.resolverManager.resolving_indexes.get(index):
+        if self.resolverManager.resolving_indexes.get(self.table.link_dynamic_item(index)):
             return
 
         self.table.setItemLoading(index,True)
