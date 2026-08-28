@@ -4,8 +4,8 @@ from PySide6.QtWidgets import (
     QApplication, QWidget, QPushButton, QVBoxLayout,QTableWidget, QProgressBar,
     QHBoxLayout, QGraphicsOpacityEffect, QLabel, QGraphicsBlurEffect,QComboBox,QFrame,QStyleOptionViewItem,QListView,QStyledItemDelegate, QStyle,QMenu, QStyleOption,QTableWidgetItem,QAbstractItemView
 )
-from PySide6.QtGui import QColor,QPixmap, QPainter, QLinearGradient, QImage,QPalette, QPen, QBrush,QAction,QFont
-from PySide6.QtCore import QPropertyAnimation, QRect, QEasingCurve, Qt, Signal,QObject, QProcess,QParallelAnimationGroup,QSize, Slot,QPersistentModelIndex
+from PySide6.QtGui import QColor,QPixmap, QPainter, QLinearGradient, QImage,QPalette, QPen, QBrush,QAction,QFont,QPalette
+from PySide6.QtCore import QPropertyAnimation, QRect, QEasingCurve, Qt, Signal,QObject, QProcess,QParallelAnimationGroup,QSize, Slot,QPersistentModelIndex,Property
 from PySide6.QtMultimedia import QAudioOutput, QMediaDevices, QMediaPlayer,QAudioBufferOutput
 from modules.types import PlaylistItem
 import __main__ 
@@ -155,11 +155,43 @@ class LoadingOverlay(QWidget):
         layout.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.spinner)
 
+
+class OverlaySelectionDelegate(QStyledItemDelegate):
+    def paint(self, painter, option, index):
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+
+        real_bg = index.data(Qt.ItemDataRole.BackgroundRole)
+        real_fg = index.data(Qt.ItemDataRole.ForegroundRole)
+
+        if real_bg is not None:
+            painter.fillRect(opt.rect, real_bg)
+        else:
+            painter.fillRect(opt.rect, opt.palette.base())
+
+        is_selected = opt.state & QStyle.StateFlag.State_Selected
+        if is_selected:
+            highlight_color = opt.palette.highlight().color()
+            painter.fillRect(opt.rect, highlight_color)
+            opt.state &= ~QStyle.StateFlag.State_Selected
+
+        opt.backgroundBrush = QBrush(Qt.BrushStyle.NoBrush) # use qproperty-treakBgColor!
+
+        if real_fg is not None:
+            opt.palette.setBrush(QPalette.ColorRole.Text, real_fg)
+            opt.palette.setBrush(QPalette.ColorRole.WindowText, real_fg)
+
+        widget = option.widget
+        style = widget.style() if widget else QApplication.style()
+        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, widget)
+
 class PlaylistWidget(QTableWidget):
     """Кастомная таблица с поддержкой блокировки строк"""
     def __init__(self, rows=None, cols=None, parent=None):
         super().__init__(rows, cols, parent)
         self.overlays = {}
+
+        palette = self.palette()
         
         self._next_safe_id = 1
         self._mem_to_safe_id = {} # id памяти -> безопасный маленький ID
@@ -171,6 +203,17 @@ class PlaylistWidget(QTableWidget):
         self.playlist = []
         self.current_index: Optional[int] = None
 
+        self._treak_color_is_current = QColor(palette.color(QPalette.ColorRole.HighlightedText))
+        self._treak_color_unavailable = palette.color(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text) # "#5f6368"
+        self._treak_color_not_loaded = palette.color(QPalette.ColorGroup.Inactive, QPalette.ColorRole.Text) # "#a5a5a5"
+        self._treak_color = QColor("#f2f2f2")
+
+        self._treak_bg_is_current = QColor(palette.color(QPalette.ColorRole.Accent))
+        self._treak_bg_unavailable = palette.color(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Base)  #"#0b0b0b"
+        self._treak_bg_not_loaded = QColor("#0f0f0f")   #"#0f0f0f"
+
+        self.setItemDelegate(OverlaySelectionDelegate(self))
+
         # --- Drag & Drop ---
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -178,6 +221,70 @@ class PlaylistWidget(QTableWidget):
         self.setAcceptDrops(True)
         self.setDropIndicatorShown(True)
         self.setDragDropMode(QAbstractItemView.InternalMove)
+
+
+    @Property(QColor)
+    def treakColorCurrent(self):
+        return self._treak_color_is_current
+
+    @treakColorCurrent.setter
+    def treakColorCurrent(self, color: QColor):
+        self._treak_color_is_current = color
+        self.update() 
+
+    @Property(QColor)
+    def treakColorUnavailable(self):
+        return self._treak_color_unavailable
+
+    @treakColorUnavailable.setter
+    def treakColorUnavailable(self, color: QColor):
+        self._treak_color_unavailable = color
+        self.update()
+
+    @Property(QColor)
+    def treakColorNotLoaded(self):
+        return self._treak_color_not_loaded
+
+    @treakColorNotLoaded.setter
+    def treakColorNotLoaded(self, color: QColor):
+        self._treak_color_not_loaded = color
+        self.update()
+
+    @Property(QColor)
+    def treakColor(self):
+        return self._treak_color
+
+    @treakColor.setter
+    def treakColor(self, color: QColor):
+        self._treak_color = color
+        self.update()
+
+    @Property(QColor)
+    def treakBgColorCurrent(self):
+        return self._treak_bg_is_current 
+
+    @treakBgColorCurrent.setter
+    def treakBgColorCurrent(self, color: QColor):
+        self._treak_bg_is_current  = color
+        self.update() 
+
+    @Property(QColor)
+    def treakBgColorUnavailable(self):
+        return self._treak_bg_unavailable
+
+    @treakBgColorUnavailable.setter
+    def treakBgColorUnavailable(self, color: QColor):
+        self._treak_bg_unavailable = color
+        self.update()
+
+    @Property(QColor)
+    def treakBgColorNotLoaded(self):
+        return self._treak_bg_not_loaded
+
+    @treakBgColorNotLoaded.setter
+    def treakBgColorNotLoaded(self, color: QColor):
+        self._treak_bg_not_loaded = color
+        self.update()
 
     def setPlaylist(self,playlist):
         self.playlist=playlist
@@ -216,21 +323,22 @@ class PlaylistWidget(QTableWidget):
         item = self.playlist[row]
         is_current = row == self.current_index
         if is_current:
-            background = QBrush(QColor("#1e2a33"))
+            background = QBrush(self._treak_bg_is_current)
         elif item.unavailable:
-            background = QBrush(QColor("#0b0b0b"))
+            background = QBrush(self._treak_bg_unavailable)
         elif not item.stream_url:
-            background = QBrush(QColor("#0f0f0f"))
+            background = QBrush(self._treak_bg_not_loaded)
         else:
             background = QBrush() 
 
-        if item.unavailable:
-            foreground = QBrush(QColor("#5f6368"))
-
+        if is_current:
+            foreground = QBrush(self._treak_color_is_current)
+        elif item.unavailable:
+            foreground = QBrush(self._treak_color_unavailable)
         elif not item.stream_url:
-            foreground = QBrush(QColor("#a5a5a5"))
+            foreground = QBrush(self._treak_color_not_loaded)
         else:
-            foreground = QBrush(QColor("#f2f2f2"))
+            foreground = QBrush(self._treak_color)
 
         for column in range(self.columnCount()):
             table_item = self.item(row, column)
@@ -647,10 +755,11 @@ def LocalSaveDir():
         os.makedirs(os.path.join(os.path.expanduser('~'),".config","MSMP-Stream","6.0"), exist_ok=True)
         return os.path.join(os.path.expanduser('~'),".config","MSMP-Stream","6.0")
     elif (sys.platform == "win32"):
-        if "__compiled__" in globals(): # I'm too lazy to support Windows for now.
-            return os.path.dirname(os.path.abspath(sys.argv[0]))
-        else:
-            return os.path.dirname(os.path.abspath(sys.modules['__main__'].__file__))
+        os.makedirs(os.path.join(os.environ['APPDATA'],".config","MSMP-Stream","6.0"), exist_ok=True)
+        #if "__compiled__" in globals(): # I'm too lazy to support Windows for now.
+        #    return os.path.dirname(os.path.abspath(sys.argv[0]))
+        #else:
+        #    return os.path.dirname(os.path.abspath(sys.modules['__main__'].__file__))
     else:
         raise RuntimeError("MSMP not supported on this platform")
 

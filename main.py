@@ -616,10 +616,9 @@ class PlayerWindow(QMainWindow,AudioController,SkinManager):
 
 
     def show_playlist_menu(self, position: QPoint):
-        # Получаем индекс строки/ячейки, где был совершен клик
         index = self.table.indexAt(position)
         if not index.isValid():
-            return # Кликнули вне заполненной области
+            return 
 
         # 4. Создаем меню
         menu = QMenu(self)
@@ -1968,13 +1967,6 @@ class PlayerWindow(QMainWindow,AudioController,SkinManager):
         if(self.db):
             self.db.close()
 
-
-        try:
-            with open(os.path.join(LocalSaveDir(),"config","config.yml"), "w", encoding="utf-8") as file:
-                yaml.dump(self.config, file, default_flow_style=False, allow_unicode=True)
-        except OSError as exc:
-            print(exc)
-
         self.events.on_app_closing.emit()
 
         data = self.to_msmp_playlist()
@@ -1982,6 +1974,12 @@ class PlayerWindow(QMainWindow,AudioController,SkinManager):
         try:
             with open(os.path.join(LocalSaveDir(),"autosave.plmsmpsbox"), "w", encoding="utf-8") as file:
                 json.dump(data, file, ensure_ascii=False, indent=2)
+        except OSError as exc:
+            print(exc)
+
+        try:
+            with open(os.path.join(LocalSaveDir(),"config","config.yml"), "w", encoding="utf-8") as file:
+                yaml.dump(self.config, file, default_flow_style=False, allow_unicode=True)
         except OSError as exc:
             print(exc)
 

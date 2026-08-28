@@ -45,15 +45,21 @@ QMainWindow{
 QTableWidget {
     background: #000;
     color: #f2f2f2;
-    selection-background-color: #151515;
+    selection-background-color: rgba(89, 22, 21, 150);
     selection-color: #ffffff;
     border: 0;
     outline: 0;
 }
 QTableWidget::item {
     padding: 3px 6px;
+    background-color: transparent;
+}
+
+QTableWidget::item:hover {
+    padding: 3px 6px;
     border: 0;
 }
+
 QPushButton, QComboBox {
     background: #242424;
     color: #d7d7d7;
@@ -80,12 +86,13 @@ QListView::item {
     padding: 8px 10px;
     border: none;
 }
-        QComboBox::drop-down {
+
+QComboBox::drop-down {
 border: none;
-        }
-        QComboBox QAbstractItemView {
+}
+QComboBox QAbstractItemView {
 outline: none;
-        }
+}
 
 QPushButton:hover, QComboBox:hover {
     background: #191919;
@@ -123,6 +130,16 @@ VisualizerWindow{
         qproperty-barColorPeak: #6d6d6d;
 }
 
+PlaylistWidget{
+    qproperty-treakBgColorCurrent: #b72e2b;
+    qproperty-treakColorCurrent: #fff;
+
+    qproperty-treakColorNotLoaded: #a5a5a5;
+    qproperty-treakBgColorNotLoaded: #0f0f0f;
+
+    qproperty-treakColorUnavailable: #333333;
+    qproperty-treakBgColorUnavailable: #0b0b0b;
+}
 
 QSlider{
 background-color: rgba(0,0,0,0);
