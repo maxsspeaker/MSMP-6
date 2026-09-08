@@ -18,9 +18,6 @@ import shutil
 import subprocess
 import tempfile
 
-if (sys.platform == "linux"):
-    os.environ["QT_AUDIO_BACKEND"] = "PulseAudio" # <--- место для конфига
-
 from dbus_next import Variant
 from PySide6.QtCore import (
     QObject,
@@ -67,13 +64,12 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QToolTip
 )
-from modules.other import GradientImageLabel,FixedComboBox,SystemMenuBar,get_ffmpeg_executable,LocalSaveDir,PlaylistWidget,AudioController,LoadConfigYaml,SkinManager
+from modules.other import GradientImageLabel,FixedComboBox,SystemMenuBar,get_ffmpeg_executable,LocalSaveDir,PlaylistWidget,AudioController,LoadConfigYaml
 from modules.types import *
 from modules.pluginLoader import PluginLoader
 from modules.dbus import MprisServer
-from modules.ui_engine import UIEngine
+from modules.ui_engine import UIEngine,SkinManager,WaveformSeekBar,WAVEFORM_BIN_COUNT,WAVEFORM_HEIGHT
 from modules.AudioStatsDb import AudioStatsDb
-from modules.AboutWindow import AboutWindow
 from modules import extractors
 
 UIEngine.register("gradientImageLabel", GradientImageLabel)
@@ -83,13 +79,6 @@ UIEngine.register("systemmenubar",      SystemMenuBar)
 
 ERROR_REPORTER: Optional["ErrorReporter"] = None
 
-WAVEFORM_BIN_COUNT = 440
-WAVEFORM_BACKGROUND_COLOR = "#00000000"
-WAVEFORM_TRACK_COLOR = "#232323"
-WAVEFORM_BUFFER_COLOR = "#7c7c7c"
-WAVEFORM_PLAYED_COLOR = "#e8e8e8"
-WAVEFORM_HANDLE_COLOR = "#f2f2f2"
-WAVEFORM_HEIGHT = 44
 
 
 def is_video_unavailable_error(error: str) -> bool:
@@ -297,176 +286,6 @@ class VisualizerWindow(QWidget):
 
 
 
-class WaveformSeekBar(QWidget):
-    sliderPressed = Signal()
-    sliderMoved = Signal(int)
-    sliderReleased = Signal()
-    valueChanged = Signal(int)
-
-    def __init__(self,parent=None) -> None:
-        super().__init__()
-        self._minimum = 0
-        self._maximum = 1
-        self._value = 0
-        self._waveform: list[float] = []
-        self._buffered_ratio = 0.0
-        self._dragging = False
-        self.setMouseTracking(True)
-        self.setCursor(Qt.PointingHandCursor)
-        self.setFixedHeight(WAVEFORM_HEIGHT)
-        self.setObjectName("waveformSeekBar")
-        self.parent=parent
-
-
-    def setRange(self, minimum: int, maximum: int) -> None:
-        self._minimum = int(minimum)
-        self._maximum = max(self._minimum, int(maximum))
-        self.setValue(self._value)
-
-    def setValue(self, value: int) -> None:
-        value = self._clamp(value)
-        if value != self._value:
-            self._value = value
-            self.valueChanged.emit(self._value)
-        self.update()
-
-    def value(self) -> int:
-        return self._value
-
-    def set_waveform(self, waveform: list[float]) -> None:
-        self._waveform = [min(1.0, max(0.0, float(level))) for level in waveform]
-        self.update()
-
-    def set_buffered_ratio(self, ratio: float) -> None:
-        self._buffered_ratio = max(0.0, min(1.0, float(ratio)))
-        self.update()
-
-    def _clamp(self, value: int) -> int:
-        return max(self._minimum, min(self._maximum, int(value)))
-
-    def _value_from_x(self, x: float) -> int:
-        if self._maximum <= self._minimum:
-            return self._minimum
-
-        usable = max(1.0, float(self.width() - 24))
-        left = 12.0
-        ratio = (float(x) - left) / usable
-        ratio = max(0.0, min(1.0, ratio))
-        return int(round(self._minimum + ratio * (self._maximum - self._minimum)))
-
-    def _x_from_value(self, value: int) -> float:
-        if self._maximum <= self._minimum:
-            return 12.0
-        usable = max(1.0, float(self.width() - 24))
-        ratio = (self._clamp(value) - self._minimum) / float(self._maximum - self._minimum)
-        return 12.0 + ratio * usable
-
-    def _format_ms(self, ms: int) -> str:
-        seconds = max(0, ms // 1000)
-        minutes, seconds = divmod(seconds, 60)
-        hours, minutes = divmod(minutes, 60)
-        if hours:
-            return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-        return f"{minutes}:{seconds:02d}"
-
-    def _show_seek_tooltip(self, value: int, global_pos) -> None:
-        QToolTip.showText(global_pos, self._format_ms(value), self)
-
-    def mousePressEvent(self, event) -> None:
-        if event.button() == Qt.LeftButton:
-            self._dragging = True
-            self.sliderPressed.emit()
-            value = self._value_from_x(event.position().x())
-            self.setValue(value)
-            self.sliderMoved.emit(value)
-            self._show_seek_tooltip(value, event.globalPosition().toPoint())
-            event.accept()
-            return
-        super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event) -> None:
-        if self._dragging:
-            value = self._value_from_x(event.position().x())
-            self.setValue(value)
-            self.sliderMoved.emit(value)
-            self._show_seek_tooltip(value, event.globalPosition().toPoint())
-            event.accept()
-            return
-        super().mouseMoveEvent(event)
-
-    def mouseReleaseEvent(self, event) -> None:
-        if self._dragging and event.button() == Qt.LeftButton:
-            value = self._value_from_x(event.position().x())
-            self.setValue(value)
-            self.sliderMoved.emit(value)
-            self._dragging = False
-            self.sliderReleased.emit()
-            QToolTip.hideText()
-            event.accept()
-            return
-        super().mouseReleaseEvent(event)
-
-    def paintEvent(self, _event) -> None:
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        painter.fillRect(self.rect(), QColor(WAVEFORM_BACKGROUND_COLOR))
-
-        outer = self.rect().adjusted(2, 6, -2, -6)
-        if outer.width() <= 0 or outer.height() <= 0:
-            return
-
-        painter.setPen(Qt.NoPen)
-        #painter.setBrush(QColor("#141414"))
-        #painter.drawRoundedRect(outer, 0, 0)
-
-        inner = outer.adjusted(10, 3, -10, -3)
-        if inner.width() <= 0 or inner.height() <= 0:
-            return
-
-        center_y = inner.center().y()
-        half_height = max(1.0, inner.height() / 2.0)
-        waveform = self._waveform
-
-        if waveform:
-            bin_count = len(waveform)
-            if bin_count <= 0:
-                waveform = []
-            else:
-                bin_width = max(1.0, inner.width() / float(bin_count))
-                played_index = 0
-                if self._maximum > self._minimum:
-                    ratio = (self._value - self._minimum) / float(self._maximum - self._minimum)
-                    played_index = int(ratio * bin_count)
-                    if played_index >= bin_count:
-                        played_index = bin_count - 1
-                buffered_index = int(max(0, bin_count - 1) * self._buffered_ratio)
-
-                for i, level in enumerate(waveform):
-                    x = inner.left() + i * bin_width
-                    bar_h = max(1.0, level * half_height)
-                    if i <= played_index:
-                        color = QColor(WAVEFORM_PLAYED_COLOR)
-                    elif i <= buffered_index:
-                        color = QColor(WAVEFORM_BUFFER_COLOR)
-                    else:
-                        color = QColor(WAVEFORM_TRACK_COLOR)
-                    painter.setBrush(color)
-                    painter.drawRect(int(x), int(center_y - bar_h), max(1, int(math.ceil(bin_width))), int(bar_h * 2))
-        else:
-            painter.setBrush(QColor(WAVEFORM_TRACK_COLOR))
-            painter.drawRect(inner)
-
-            buffered_width = int(round(inner.width() * self._buffered_ratio))
-            if buffered_width > 0:
-                buffered_rect = inner.__class__(inner.left(), inner.top(), buffered_width, inner.height())
-                painter.setBrush(QColor(WAVEFORM_BUFFER_COLOR))
-                painter.drawRect(buffered_rect)
-
-        if self._maximum > self._minimum:
-            handle_x = self._x_from_value(self._value)
-            painter.setBrush(QColor(WAVEFORM_HANDLE_COLOR))
-            painter.drawRect(int(handle_x) - 1, inner.top() - 3, 2, inner.height() + 6)
-
 
 class WaveformSignals(QObject):
     generated = Signal(int, object)
@@ -604,12 +423,11 @@ class WaveformTask(QRunnable):
 
 
 # Регистрируем кастомные виджеты после их объявления
-UIEngine.register("waveformSeekBar",  WaveformSeekBar)
 UIEngine.register("visualizerWindow", VisualizerWindow)
 UIEngine.register("qtablewidget", PlaylistWidget) #!!! legacy БУДЕТ УБРАНО В 6.0.4 исправьте кастомные скины!!!!
 UIEngine.register("playlistwidget", PlaylistWidget)
 
-class PlayerWindow(QMainWindow,AudioController,SkinManager):
+class PlayerWindow(SkinManager,AudioController):
     MAX_RESTARTS = 3
     PLAY_MODES_icons = ("resources/arrow-s-right.svg", "resources/out-loop.svg", "resources/loop.svg", "resources/shuffle.svg")
     PLAY_MODES = ("Seq", "One", "All", "Rnd")
@@ -620,10 +438,8 @@ class PlayerWindow(QMainWindow,AudioController,SkinManager):
         if not index.isValid():
             return 
 
-        # 4. Создаем меню
         menu = QMenu(self)
 
-        # Добавляем действия (кнопки) в меню
         action1 = QAction("Воспроизвести", self)
         action1.triggered.connect(lambda: self.play_index(self.table.rowAt(position.y())))
         menu.addAction(action1)
@@ -650,7 +466,6 @@ class PlayerWindow(QMainWindow,AudioController,SkinManager):
         action5.triggered.connect(lambda: self.table.remove_row(index.row()))
         menu.addAction(action5)
 
-        # 5. Показываем меню в точке клика
         menu.exec(self.table.viewport().mapToGlobal(position))
 
     def __init__(self,skin: str) -> None:
@@ -669,7 +484,8 @@ class PlayerWindow(QMainWindow,AudioController,SkinManager):
         if not(skin=="default"):
             self.config["skin"]=skin
 
-        print(self.config["skin"])
+        if (sys.platform == "linux"):
+            os.environ["QT_AUDIO_BACKEND"] =  os.environ.get("QT_AUDIO_BACKEND",self.config.get("AUDIO_BACKEND","PulseAudio"))
 
         self.plugin_loader = PluginLoader()
         self.plugin_loader.load_all(context=self)
@@ -716,164 +532,18 @@ class PlayerWindow(QMainWindow,AudioController,SkinManager):
 
         self._init_player()
 
+        self._init_ui()
+
         self.player.positionChanged.connect(self.on_position_changed)
         self.player.durationChanged.connect(self.on_duration_changed)
         self.player.playbackStateChanged.connect(self.on_playback_state_changed)
         self.player.mediaStatusChanged.connect(self.on_media_status_changed)
         self.player.errorOccurred.connect(self.on_player_error)
-        try:
-            self.player.bufferProgressChanged.connect(self.on_buffer_progress_changed)
-        except AttributeError:
-            pass
 
         self.buffer_progress_timer = QTimer(self)
         self.buffer_progress_timer.setInterval(120)
         self.buffer_progress_timer.timeout.connect(self.poll_buffer_progress)
 
-        # ── Построение UI через движок ─────────────────────────────────────
-        _ui_xml_path = os.path.join(os.path.dirname(__file__), f"skins/{self.config["skin"]}")
-
-        self._engine = UIEngine(context=self, default_spacing=0, default_margin=0)
-        container = self._engine.build_file(_ui_xml_path)
-
-        # Удобный алиас: self.ui["widget_id"]
-        self.ui = self._engine.widgets
-
-        # ── Ссылки на виджеты (совместимость с остальным кодом) ───────────
-        self.NowDisplay          = self.ui["NowDisplay"]
-        self.cover_background    = self.ui.get("cover_background")
-        self.cover_label         = self.ui["cover_label"]
-        self.position_slider     = self.ui["position_slider"]
-        self.volume_slider       = self.ui["volume_slider"]
-        self.status_label        = self.ui["status_label"]
-        self.url_input           = self.ui["url_input"]
-        self.add_button          = self.ui["add_button"]
-        self.cookie_browser      = self.ui["cookie_browser"]
-        self.clear_button        = self.ui["clear_button"]
-        self.save_button         = self.ui["save_button"]
-        self.load_button         = self.ui["load_button"]
-        self.play_button         = self.ui["play_button"]
-        self.pause_button        = self.ui["pause_button"]
-        self.stop_button         = self.ui["stop_button"]
-        self.prev_button         = self.ui["prev_button"]
-        self.next_button         = self.ui["next_button"]
-        self.restart_button      = self.ui["restart_button"]
-        self.mode_button         = self.ui["mode_button"]
-        self.playlistBox         = self.ui["playlistBox"]
-        self.MainMenuBar         = self.ui["MainMenuBar"]
-
-        if not(self.ui.get("playlist_table")): 
-            self.table = self.ui["table"] #!!! legacy БУДЕТ УБРАНО В 6.0.4 исправьте кастомные скины!!!
-        else:
-            self.table = self.ui["playlist_table"]
-
-
-        file_menu = self.MainMenuBar.add_menu("Menu")
-        file_menu.addAction("About",lambda:AboutWindow(self).exec())
-        self.PlguinMenu=self.MainMenuBar.add_submenu(file_menu, "Plugins")
-
-        setup_menu=self.MainMenuBar.add_menu("Settings")
-        skin_menu=self.MainMenuBar.add_submenu(setup_menu, "Skins", hide_if_empty=False)
-
-        for skin in sorted(os.listdir(os.path.join(os.path.dirname(__file__), "skins"))):
-           skin_menu.addAction(skin, lambda s=skin: self.set_skin(s)) 
-        
-        self.PluginMenu=self.PlguinMenu #!!! legacy БУДЕТ УБРАНО В 6.0.4 исправьте кастомные скины!!!
-
-        file_menu.addSeparator()
-        file_menu.addAction("Exit", self.close)
-        file_menu.addSeparator()
-
-        self.visualizer_window = self.ui.get("visualizer_window")
-
-        if(self.visualizer_window):
-            self.visualizer_window.raise_()
-            self.visualizer_window.activateWindow()
-
-            self.audio_buffer_output.audioBufferReceived.connect(self.on_audio_buffer_received)
-
-            self.visualizer_window.show()
-
-        if (self.cover_background):
-            self.cover_background.gradient = [(0.95, QColor(0, 0, 0, 0)), (0.6, QColor(0, 0, 0, 128))]
-            self.cover_background.setAlignment(Qt.AlignCenter)
-            self.cover_background.setScaledContents(True)
-            self.cover_background.lower()
-            self.cover_background.setGeometry(self.NowDisplay.rect())
-
-        self.set_metaData(
-            time_possition="0:00",
-            time_end="0:00",
-            track_title="",
-            artist="",
-            album=""
-            )
-        self.set_cover_placeholder()
-
-
-        self.mode_button.setIcon(QIcon(self.PLAY_MODES_icons[self.play_mode_index]))
-
-        # ── Донастройка cookie_browser (userData для элементов) ───────────
-        cookie_data = ["", "firefox", "chrome", "chromium", "brave", "edge"]
-        for i, data in enumerate(cookie_data):
-            self.cookie_browser.setItemData(i, data)
-        self.cookie_browser.setCurrentIndex(self.config["cookies"]["selected"])
-        self.cookie_browser.currentIndexChanged.connect(self.change_cookie_browser)
-
-        # ── Дополнительный connect для url_input (returnPressed) ──────────
-        self.url_input.returnPressed.connect(self.add_url)
-
-        # ── Донастройка volume_slider ─────────────────────────────────────
-        self.volume_slider.valueChanged.connect(
-            lambda value: self.audio_output.setVolume(value / 100)
-        )
-
-        # ── Донастройка seek bar ──────────────────────────────────────────
-
-        if isinstance(self.position_slider, WaveformSeekBar):
-            self.position_slider.set_buffered_ratio(0.0)
-        self.position_slider.setRange(0, 0)
-
-        self.position_slider.sliderPressed.connect(self.on_seek_start)
-        self.position_slider.sliderReleased.connect(self.on_seek_end)
-        self.position_slider.sliderMoved.connect(self.on_seek_preview)
-
-        # ── Донастройка таблицы ───────────────────────────────────────────
-        self.table.playlist = self.playlist
-        self.table.setColumnCount(2)
-        self.table.setHorizontalHeaderLabels(["Track", "Length"])
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().hide()
-        self.table.verticalHeader().hide()
-        self.table.setShowGrid(False)
-        self.table.setAlternatingRowColors(False)
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.table.cellDoubleClicked.connect(lambda row, _col: self.play_index(row))
-        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.table.customContextMenuRequested.connect(self.show_playlist_menu)
-        self.table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
-        self.table.verticalScrollBar().setSingleStep(1)
-        self.table.viewport().installEventFilter(self)
-        QScroller.grabGesture(self.table.viewport(), QScroller.LeftMouseButtonGesture)
-
-        scroller = QScroller.scroller(self.table.viewport())
-        props = QScrollerProperties()
-        props.setScrollMetric(QScrollerProperties.DragStartDistance, 0.004)
-        props.setScrollMetric(QScrollerProperties.DragVelocitySmoothingFactor, 0.6) # Сделали чуть отзывчивее
-        props.setScrollMetric(QScrollerProperties.ScrollingCurve, QEasingCurve(QEasingCurve.OutCubic))
-        scroller.setScrollerProperties(props)
-
-        # ── Политика размера playlistBox ──────────────────────────────────
-        self.playlistBox.setMinimumHeight(0)
-        sp = self.playlistBox.sizePolicy()
-        sp.setVerticalPolicy(QSizePolicy.Policy.Ignored)
-        self.playlistBox.setSizePolicy(sp)
-
-
-        self.setCentralWidget(container)
-        self.apply_style()
         self.setup_mpris()
 
         self.plugin_loader.init_all(context=self)
@@ -900,8 +570,11 @@ class PlayerWindow(QMainWindow,AudioController,SkinManager):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if(self.cover_background):
-            self.cover_background.setGeometry(0, 0, self.width(), self.height())
+
+        cover_background = self.ui.get("cover_background")
+        if(cover_background):
+            cover_background.setGeometry(cover_background.parentWidget().rect())
+            #self.cover_background.setGeometry(0, 0, self.width(), self.height())
 
     def add_url(self) -> None:
         url = self.url_input.text().strip()
@@ -1292,32 +965,6 @@ class PlayerWindow(QMainWindow,AudioController,SkinManager):
             self.table.current_index -= 1
         self.refresh_table()
 
-    def set_metaData(self,time_possition=None,time_end=None,track_title=None,artist=None,album=None):
-        if(time_possition and time_end):
-            time_label=self.ui.get("time_label")
-            time_possition_label=self.ui.get("time_possition_label")
-            time_end_label=self.ui.get("time_end_label")
-            if(time_label):
-                time_label.setText(f"{time_possition} / {time_end}")
-            if(time_possition_label):
-                time_label.setText(f"{time_possition}")
-            if(time_end_label):
-                time_label.setText(f"{time_end}")
-
-
-        if(track_title):
-            track_title_label=self.ui.get("track_title_label")
-            if(track_title_label):
-                track_title_label.setText(track_title)
-        if(artist):
-            artist_label=self.ui.get("artist_label")
-            if(artist_label):
-                artist_label.setText(artist)
-        if(album):
-            album_label=self.ui.get("album_label")
-            if(album_label):
-                album_label.setText(album)
-
     def clear_playlist(self) -> None:
         self.stop_playback()
         self.playlist.clear()
@@ -1489,23 +1136,30 @@ class PlayerWindow(QMainWindow,AudioController,SkinManager):
         if item.artwork_url:
             self.network.get(QNetworkRequest(QUrl(item.artwork_url)))
 
-    def set_cover_placeholder(self) -> None:
-        if (self.cover_background):
-            self.cover_background.set_new_image(QPixmap("resources/MSMPwaveBg.png"))
-        self.cover_label.set_new_image(QPixmap("resources/MSMPwave.png"))
+    
 
     def on_artwork_loaded(self, reply) -> None:
         data = reply.readAll()
         pixmap = QPixmap()
+
+        cover_label = self.ui.get("cover_label")
+        cover_background = self.ui.get("cover_background")
+
         if pixmap.loadFromData(data):
-            scaled = pixmap.scaled(
-                self.cover_label.size(),
-                Qt.KeepAspectRatioByExpanding,
-                Qt.SmoothTransformation,
-            )
-            self.cover_label.set_new_image(scaled)
-            if (self.cover_background):
-                self.cover_background.set_new_image(scaled)
+            if(cover_label):
+                scaled = pixmap.scaled(
+                    cover_label.size(),
+                    Qt.KeepAspectRatioByExpanding,
+                    Qt.SmoothTransformation,
+                )
+                cover_label.set_new_image(scaled)
+            if(cover_background):
+                scaled = pixmap.scaled(
+                    cover_background.size(),
+                    Qt.KeepAspectRatioByExpanding,
+                    Qt.SmoothTransformation,
+                )
+                cover_background.set_new_image(scaled)
         else:
             self.set_cover_placeholder()
         reply.deleteLater()
@@ -1959,13 +1613,17 @@ class PlayerWindow(QMainWindow,AudioController,SkinManager):
         self.audio_output.setVolume(value / 100)
         self.on_volume_changed(value)
 
-    def apply_style(self) -> None:
-        with open(os.path.join(os.path.dirname(__file__), f"skins/{self.config["skin"]}/style.css")) as f:
-            self.setStyleSheet(f.read())
 
     def closeEvent(self, event) -> None:
         if(self.db):
             self.db.close()
+
+
+        try:
+            with open(os.path.join(LocalSaveDir(),"config","config.yml"), "w", encoding="utf-8") as file:
+                yaml.dump(self.config, file, default_flow_style=False, allow_unicode=True)
+        except OSError as exc:
+            print(exc)
 
         self.events.on_app_closing.emit()
 
@@ -1974,12 +1632,6 @@ class PlayerWindow(QMainWindow,AudioController,SkinManager):
         try:
             with open(os.path.join(LocalSaveDir(),"autosave.plmsmpsbox"), "w", encoding="utf-8") as file:
                 json.dump(data, file, ensure_ascii=False, indent=2)
-        except OSError as exc:
-            print(exc)
-
-        try:
-            with open(os.path.join(LocalSaveDir(),"config","config.yml"), "w", encoding="utf-8") as file:
-                yaml.dump(self.config, file, default_flow_style=False, allow_unicode=True)
         except OSError as exc:
             print(exc)
 

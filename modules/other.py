@@ -125,12 +125,6 @@ class AudioController():
         print(f"Устройство вывода установлено на: {default_device.description()}")
 
 
-class SkinManager():
-
-    def set_skin(self,skin):
-        print(skin)
-        self.config["skin"]=skin
-
 class LoadingOverlay(QWidget):
     """Виджет-оверлей, который будет накладываться поверх строки"""
     def __init__(self, parent=None):
@@ -187,7 +181,7 @@ class OverlaySelectionDelegate(QStyledItemDelegate):
 
 class PlaylistWidget(QTableWidget):
     """Кастомная таблица с поддержкой блокировки строк"""
-    def __init__(self, rows=None, cols=None, parent=None):
+    def __init__(self, rows=None, cols=None, parent=None,rowHeight=44,inlineAudio=False):
         super().__init__(rows, cols, parent)
         self.overlays = {}
 
@@ -196,6 +190,9 @@ class PlaylistWidget(QTableWidget):
         self._next_safe_id = 1
         self._mem_to_safe_id = {} # id памяти -> безопасный маленький ID
         self._item_row_map = {}
+
+        self.inlineAudio=inlineAudio # 12
+        self.rowHeight=rowHeight #44
 
         self.verticalScrollBar().valueChanged.connect(self.update_overlays_position)
         self.horizontalScrollBar().valueChanged.connect(self.update_overlays_position)
@@ -308,12 +305,15 @@ class PlaylistWidget(QTableWidget):
         self._item_row_map[safe_id] = row
         
         artist = item.uploader or "Unknown artist"
-        track_item = QTableWidgetItem(f"{item.title}\n{artist}")
+        if(self.inlineAudio):
+            track_item = QTableWidgetItem(f"{row+1}. {artist} - {item.title}")
+        else:
+            track_item = QTableWidgetItem(f"{item.title}\n{artist}")
         track_item.setData(Qt.UserRole, item.page_url)
         length_item = QTableWidgetItem(self.format_time(item.duration * 1000))
         self.setItem(row, 0, track_item)
         self.setItem(row, 1, length_item)
-        self.setRowHeight(row, 44)
+        self.setRowHeight(row, self.rowHeight)
         self.apply_row_style(row)
 
     def apply_row_style(self, row: int) -> None:
