@@ -50,6 +50,8 @@ jobs:
             exit 1
           fi
 
+          rm -rf *.build
+
           cp -r resources "$dist_root/resources"
           cp -r skins "$dist_root/skins"
 
@@ -129,6 +131,8 @@ jobs:
         run: |
           $distRoot = Get-ChildItem dist -Directory | Where-Object { $_.Name -like "*.dist" } | Select-Object -First 1
           if (-not $distRoot) { throw "dist folder not found" }
+
+          Remove-Item -Path .\*.build -Recurse -Force
 
           Copy-Item -Recurse -Force resources "$($distRoot.FullName)\resources"
           Copy-Item -Recurse -Force skins "$($distRoot.FullName)\skins"
