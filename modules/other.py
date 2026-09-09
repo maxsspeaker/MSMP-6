@@ -757,7 +757,8 @@ def LocalSaveDir():
         os.makedirs(os.path.join(os.path.expanduser('~'),".config","MSMP-Stream","6.0"), exist_ok=True)
         return os.path.join(os.path.expanduser('~'),".config","MSMP-Stream","6.0")
     elif (sys.platform == "win32"):
-        os.makedirs(os.path.join(os.environ['APPDATA'],".config","MSMP-Stream","6.0"), exist_ok=True)
+        os.makedirs(os.path.join(os.environ['APPDATA'],"MSMP-Stream","6.0"), exist_ok=True)
+        return os.path.join(os.environ['APPDATA'],"MSMP-Stream","6.0")
         #if "__compiled__" in globals(): # I'm too lazy to support Windows for now.
         #    return os.path.dirname(os.path.abspath(sys.argv[0]))
         #else:
@@ -775,7 +776,7 @@ def LoadConfigYaml():
         return config
     else:
         config = {
-            "cookies":{"browser":"firefox","selected":0},
+            "cookies":{"browser":None,"selected":0},
             "skin":"Foxyglass"
         }
 

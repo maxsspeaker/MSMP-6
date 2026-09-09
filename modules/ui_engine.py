@@ -466,8 +466,7 @@ class UIEngine:
         if not icon:
             return
         if hasattr(widget, "setIcon"):
-
-            widget.setIcon(QIcon(re.sub(r"^\{internal\}", _skin_path, icon)))
+            widget.setIcon(QIcon(icon.replace("{internal}", _skin_path, 1) if icon.startswith("{internal}") else icon))
 
     @staticmethod
     def _apply_specifics(widget: QWidget, attrs: dict, text: str) -> None:
