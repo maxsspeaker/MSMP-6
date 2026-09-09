@@ -52,9 +52,9 @@ cookies напрямую в библиотеку `yt-dlp`.
 | :---:| :---: | :---: |
 | YouTube | ✅📁💿🎵📻🎚️ | Direct |
 | Soundcloud | 🎵🎚️ | Direct |
+| YandexMusic | 🔌📁🎵🔒 | Direct |
 | Spotify | 💤❌ | Mirror |
 | Deezer | ❓ | Direct |
-| YandexMusic | ❓🔒 | Direct |
 | VkMusic | ❓ | Direct |
 | Apple Music | ❌ | Mirror |
 | Classic MSMP ID-s | ❌ | ❌ |
@@ -62,6 +62,7 @@ cookies напрямую в библиотеку `yt-dlp`.
 ### Features
 
 - ✅ Verified and officially supported
+- 🔌 plugin
 - 📁 playlists
 - 💿 albums
 - 🎵 tracks
