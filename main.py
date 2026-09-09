@@ -111,15 +111,9 @@ class ErrorReporter(QObject):
 VISUALIZER_BAR_GAP = 2.0
 VISUALIZER_LEFT_MARGIN = 0
 VISUALIZER_RIGHT_MARGIN = 0
-VISUALIZER_TOP_MARGIN = 12
-VISUALIZER_BOTTOM_MARGIN = 12
+VISUALIZER_TOP_MARGIN = 0
+VISUALIZER_BOTTOM_MARGIN = 0
 VISUALIZER_MIN_BAR_HEIGHT = 1
-
-VISUALIZER_GAIN = 1.0
-VISUALIZER_ATTACK = 0.42
-VISUALIZER_DECAY = 0.020
-VISUALIZER_PEAK_DECAY = 0.010
-VISUALIZER_MIN_VISIBLE_LEVEL = 0.012
 
 #VISUALIZER_WINDOW_WIDTH = 250
 #VISUALIZER_WINDOW_HEIGHT = 128
@@ -149,6 +143,12 @@ class VisualizerWindow(QWidget):
         self._bar_color_peak = QColor("#FF5D5D")
         self.audio_bar_count = audio_bar_count
 
+        self._visualizer_gain=1.0
+        self._visualizer_attack=0.42
+        self._visualizer_decay=0.020
+        self._visualizer_peak_decay=0.010
+        self._visualizer_min_visible_level=0.012
+
     def set_levels(self, levels: list[float], peaks: Optional[list[float]] = None) -> None:
         if not levels:
             return
@@ -162,6 +162,48 @@ class VisualizerWindow(QWidget):
         self.levels = [min(1.0, max(0.0, level)) for level in levels]
         self.peaks = [min(1.0, max(0.0, peak)) for peak in peaks]
         self.update()
+
+
+    @Property(float)
+    def visualizer_gain(self):
+        return self._visualizer_gain
+
+    @visualizer_gain.setter
+    def visualizer_gain(self, number:float):
+        self._visualizer_gain = number
+
+    @Property(float)
+    def visualizer_attack(self):
+        return self._visualizer_attack
+
+    @visualizer_attack.setter
+    def visualizer_attack(self, number:float):
+        self._visualizer_attack = number 
+
+    @Property(float)
+    def visualizer_decay(self):
+        return self._bar_color_high
+
+    @visualizer_decay.setter
+    def visualizer_decay(self, number:float):
+        self._visualizer_decay = number
+
+    @Property(float)
+    def visualizer_peak_decay(self):
+        return self._visualizer_peak_decay
+
+    @visualizer_peak_decay.setter
+    def visualizer_peak_decay(self, number:float):
+        self._visualizer_peak_decay = number
+
+    @Property(float)
+    def visualizer_min_visible_level(self):
+        return self._visualizer_min_visible_level
+
+    @visualizer_min_visible_level.setter
+    def visualizer_min_visible_level(self, number:float):
+        self._visualizer_min_visible_level = number
+
 
     @Property(QColor)
     def barColorLow(self):
@@ -1511,17 +1553,17 @@ class PlayerWindow(SkinManager,AudioController):
         peaks: list[float] = []
 
         for previous, previous_peak, level in zip(self.visualizer_window.levels, self.visualizer_window.peaks, levels):
-            level = min(1.0, max(0.0, level * VISUALIZER_GAIN))
+            level = min(1.0, max(0.0, level * self.visualizer_window._visualizer_gain))
 
             if level >= previous:
-                value = previous + (level - previous) * VISUALIZER_ATTACK
+                value = previous + (level - previous) * self.visualizer_window._visualizer_attack
             else:
-                value = max(level, previous - VISUALIZER_DECAY)
+                value = max(level, previous - self.visualizer_window._visualizer_decay)
 
-            if value < VISUALIZER_MIN_VISIBLE_LEVEL:
+            if value < self.visualizer_window._visualizer_min_visible_level:
                 value = 0.0
 
-            peak = max(value, previous_peak - VISUALIZER_PEAK_DECAY)
+            peak = max(value, previous_peak - self.visualizer_window._visualizer_decay)
 
             smoothed.append(value)
             peaks.append(peak)

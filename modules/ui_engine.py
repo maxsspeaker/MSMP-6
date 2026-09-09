@@ -749,7 +749,6 @@ class SkinManager(QMainWindow):
 
         # ── Ссылки на виджеты (совместимость с остальным кодом) ───────────
         self.NowDisplay          = self.ui["NowDisplay"]
-        self.cover_label         = self.ui["cover_label"]
         self.position_slider     = self.ui["position_slider"]
         self.volume_slider       = self.ui["volume_slider"]
         self.status_label        = self.ui["status_label"]
@@ -777,15 +776,20 @@ class SkinManager(QMainWindow):
 
         file_menu = self.MainMenuBar.add_menu("Menu")
         file_menu.addAction("About",lambda:AboutWindow(self).exec())
-        self.PlguinMenu=self.MainMenuBar.add_submenu(file_menu, "Plugins")
 
-        setup_menu=self.MainMenuBar.add_menu("Settings")
+        setup_menu=self.MainMenuBar.add_menu("Options")
         skin_menu=self.MainMenuBar.add_submenu(setup_menu, "Skins", hide_if_empty=False)
 
         for skin in sorted(os.listdir(os.path.join(os.path.dirname(sys.modules['__main__'].__file__), "skins"))):
            skin_menu.addAction(skin, lambda s=skin: self.set_skin(s)) 
-        
-        self.PluginMenu=self.PlguinMenu #!!! legacy БУДЕТ УБРАНО В 6.0.4 исправьте кастомные скины!!!
+
+        if not hasattr(self, "PluginMenu"):
+            self.PluginMenu=self.MainMenuBar.add_submenu(setup_menu, "Plugins")
+            self.PluginMenu.setParent(self, self.PluginMenu.windowFlags())
+
+            self.PlguinMenu=self.PluginMenu #!!! legacy БУДЕТ УБРАНО В 6.0.4 исправьте кастомные скины!!!
+        else:
+            setup_menu.addMenu(self.PluginMenu)
 
         file_menu.addSeparator()
         file_menu.addAction("Exit", self.close)
@@ -912,9 +916,9 @@ class SkinManager(QMainWindow):
             if(time_label):
                 time_label.setText(f"{time_possition} / {time_end}")
             if(time_possition_label):
-                time_label.setText(f"{time_possition}")
+                time_possition_label.setText(f"{time_possition}")
             if(time_end_label):
-                time_label.setText(f"{time_end}")
+                time_end_label.setText(f"{time_end}")
 
 
         if(track_title):

@@ -13,6 +13,8 @@ import re
 import subprocess
 import shutil
 import json,yaml
+import numpy as np
+import queue
 
 class GradientImageLabel(QLabel):
     """Супер пупер навороченое отображение картинки, спиженный с моего Minecraft лаунчера"""
@@ -181,7 +183,7 @@ class OverlaySelectionDelegate(QStyledItemDelegate):
 
 class PlaylistWidget(QTableWidget):
     """Кастомная таблица с поддержкой блокировки строк"""
-    def __init__(self, rows=None, cols=None, parent=None,rowHeight=44,inlineAudio=False):
+    def __init__(self, rows=None, cols=None, parent=None,rowHeight:int = 44,inlineAudio: bool = False):
         super().__init__(rows, cols, parent)
         self.overlays = {}
 
