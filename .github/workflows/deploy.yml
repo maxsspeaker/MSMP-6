@@ -45,12 +45,15 @@ jobs:
           set -euo pipefail
 
           dist_root="$(find dist -maxdepth 1 -type d -name '*.dist' | head -n 1)"
+          build_root="$(find dist -maxdepth 1 -type d -name '*.build' | head -n 1)"
+
+
           if [ -z "$dist_root" ]; then
             echo "dist folder not found"
             exit 1
           fi
 
-          rm -rf *.build
+          rm -rf $build_root
 
           cp -r resources "$dist_root/resources"
           cp -r skins "$dist_root/skins"
@@ -130,9 +133,10 @@ jobs:
         shell: pwsh
         run: |
           $distRoot = Get-ChildItem dist -Directory | Where-Object { $_.Name -like "*.dist" } | Select-Object -First 1
+          $buildRoot = Get-ChildItem dist -Directory | Where-Object { $_.Name -like "*.build" } | Select-Object -First 1
           if (-not $distRoot) { throw "dist folder not found" }
 
-          Remove-Item -Path .\*.build -Recurse -Force
+          Remove-Item -Path "$($buildRoot.FullName)" -Recurse -Force
 
           Copy-Item -Recurse -Force resources "$($distRoot.FullName)\resources"
           Copy-Item -Recurse -Force skins "$($distRoot.FullName)\skins"
