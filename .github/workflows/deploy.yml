@@ -173,11 +173,11 @@ jobs:
           merge-multiple: true 
 
       - name: Update Nightly Release
-        uses: marvinpinto/action-automatic-releases@latest
+        uses: ncipollo/release-action@v1
         with:
-          repo_token: "${{ secrets.GITHUB_TOKEN }}"
-          automatic_release_tag: "nightly"
+          tag: "nightly"
+          name: "Nightly Development Build"
           prerelease: true
-          title: "Nightly Development Build"
-          files: |
-            release-assets/*
+          allowUpdates: true 
+          removeArtifacts: true 
+          artifacts: "release-assets/*"
