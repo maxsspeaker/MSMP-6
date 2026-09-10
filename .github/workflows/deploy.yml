@@ -1,8 +1,8 @@
 name: Build media player
 
 on:
-#  push:
-#    branches: [dev]
+  #push:
+  #  branches: [dev]
   schedule:
     - cron: '0 0 * * *'
   workflow_dispatch:
@@ -17,6 +17,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: dev 
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -74,6 +76,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: dev 
 
       - name: Setup Python
         uses: actions/setup-python@v5
