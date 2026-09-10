@@ -1,8 +1,10 @@
 name: Build media player
 
 on:
-  push:
-    branches: [dev]
+#  push:
+#    branches: [dev]
+  schedule:
+    - cron: '0 0 * * *'
   workflow_dispatch:
 
 permissions:
@@ -150,3 +152,28 @@ jobs:
         with:
           name: windows-build
           path: dist
+
+  publish-nightly:
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Create Release Directory
+        run: mkdir -p release-assets
+
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets/
+          merge-multiple: true 
+
+      - name: Update Nightly Release
+        uses: marvinpinto/action-automatic-releases@latest
+        with:
+          repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          automatic_release_tag: "nightly"
+          prerelease: true
+          title: "Nightly Development Build"
+          files: |
+            release-assets/*
