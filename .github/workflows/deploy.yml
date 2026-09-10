@@ -58,6 +58,8 @@ jobs:
           cp -r resources "$dist_root/resources"
           cp -r skins "$dist_root/skins"
 
+          mv "$dist_root" "$(dirname "$dist_root")/msmp-foxwave-Linux-amd64"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -140,6 +142,8 @@ jobs:
 
           Copy-Item -Recurse -Force resources "$($distRoot.FullName)\resources"
           Copy-Item -Recurse -Force skins "$($distRoot.FullName)\skins"
+
+          Rename-Item -Path $distRoot.FullName -NewName "msmp-foxwave-win-x64"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

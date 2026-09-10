@@ -737,11 +737,12 @@ UIEngine.register("waveformSeekBar",  WaveformSeekBar)
 
 class SkinManager(QMainWindow):
 
-    def _init_ui(self):
+    def _init_ui(self): 
         _ui_xml_path = os.path.join(os.path.dirname(sys.modules['__main__'].__file__), f"skins/{self.config["skin"]}")
 
         self._engine = UIEngine(context=self, default_spacing=0, default_margin=0)
         container = self._engine.build_file(_ui_xml_path)
+
 
         # Удобный алиас: self.ui["widget_id"]
         self.ui = self._engine.widgets
@@ -800,7 +801,7 @@ class SkinManager(QMainWindow):
             self.visualizer_window.raise_()
             self.visualizer_window.activateWindow()
 
-            self.audio_buffer_output.audioBufferReceived.connect(self.on_audio_buffer_received)
+            self.audio_buffer_output.audioBufferReceived.connect(self.on_audio_buffer_received) # если вы делаете подключение в _init_ui прочитайте _reload_skin !!
 
             self.visualizer_window.show()
 
@@ -944,11 +945,14 @@ class SkinManager(QMainWindow):
         self._reload_skin()
 
 
-    def _reload_skin(self):
+    def _reload_skin(self): 
+
+        # Если вы добовляете какое-то действие связанное с интерфейсом и его работой. Делайте отключение здесь!
+
         current_index=self.table.current_index
 
         if(self.visualizer_window):
-            self.audio_buffer_output.audioBufferReceived.disconnect(self.on_audio_buffer_received)
+            self.audio_buffer_output.audioBufferReceived.disconnect(self.on_audio_buffer_received) # пример прямо здесь
 
         self._init_ui() 
         self.refresh_table()
