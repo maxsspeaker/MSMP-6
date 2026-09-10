@@ -8,6 +8,7 @@ import json
 import shutil
 from .types import *
 import re,time
+import locale
 
 
 
@@ -292,14 +293,21 @@ class ResolveTask(QRunnable):
         CREATE_NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0) if sys.platform == "win32" else 0
         custom_env = dict(os.environ)
         custom_env.pop("LD_PRELOAD", None)
+
+        if(sys.platform == "win32"):
+            encoding = locale.getpreferredencoding()
+        else:
+            encoding = "utf-8"
+
         self._proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,   
             stderr=subprocess.PIPE,
             text=True,
-            encoding="utf-8",creationflags=CREATE_NO_WINDOW,env=custom_env
+            encoding=encoding,creationflags=CREATE_NO_WINDOW,env=custom_env,errors='replace'
             )
         json_data=None
+
 
         while True:
             line = self._proc.stdout.readline()
