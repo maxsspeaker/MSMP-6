@@ -109,7 +109,7 @@ jobs:
           mode: standalone
           output-dir: dist
           output-file: msmp-foxwave
-          windows-console-mode: attach
+          windows-console-mode: disable
           windows-icon-from-ico: resources/icon.ico
           enable-plugins: pyside6
           include-qt-plugins: multimedia,imageformats,platforms
