@@ -62,13 +62,22 @@ jobs:
           cp -r resources "$dist_root/resources"
           cp -r skins "$dist_root/skins"
 
-          mv "$dist_root" "$(dirname "$dist_root")/msmp-foxwave-Linux-amd64"
+          #mv "$dist_root" "$(dirname "$dist_root")/msmp-foxwave-Linux-amd64"
+
+      - name: Archive Linux build
+        shell: bash
+        run: |
+          cd dist
+          
+          dist_dir=$(find . -maxdepth 1 -type d -name '*.dist' | head -n 1)
+          tar -czvf linux-build.tar.gz "$dist_dir"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: linux-build
-          path: dist
+          path: dist/linux-build.tar.gz # Загружаем только архив
+
 
   build-windows:
     runs-on: windows-latest
@@ -149,13 +158,21 @@ jobs:
           Copy-Item -Recurse -Force resources "$($distRoot.FullName)\resources"
           Copy-Item -Recurse -Force skins "$($distRoot.FullName)\skins"
 
-          Rename-Item -Path $distRoot.FullName -NewName "msmp-foxwave-win-x64"
+          # Rename-Item -Path $distRoot.FullName -NewName "msmp-foxwave-win-x64"
+
+      - name: Archive Windows build
+        shell: pwsh
+        run: |
+          $distRoot = Get-ChildItem dist -Directory | Where-Object { $_.Name -like "*.dist" } | Select-Object -First 1
+          if (-not $distRoot) { throw "dist folder not found" }
+          
+          Compress-Archive -Path "$($distRoot.FullName)" -DestinationPath "dist\windows-build.zip" -Force
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows-build
-          path: dist
+          path: dist\windows-build.zip # Загружаем только архив
 
   publish-nightly:
     needs: [build-linux, build-windows]
