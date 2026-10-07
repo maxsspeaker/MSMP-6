@@ -64,13 +64,13 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QToolTip
 )
-from modules.other import GradientImageLabel,FixedComboBox,SystemMenuBar,get_ffmpeg_executable,LocalSaveDir,PlaylistWidget,AudioController,LoadConfigYaml
+from modules.other import GradientImageLabel,FixedComboBox,SystemMenuBar,get_ffmpeg_executable,LocalSaveDir,PlaylistWidget,AudioController,LoadConfigYaml,from_playlist_entry
 from modules.types import *
 from modules.pluginLoader import PluginLoader
 from modules.dbus import MprisServer
 from modules.ui_engine import UIEngine,SkinManager,WaveformSeekBar,WAVEFORM_BIN_COUNT,WAVEFORM_HEIGHT
 from modules.AudioStatsDb import AudioStatsDb
-from modules import extractors
+from modules import extractors,utils
 
 UIEngine.register("gradientImageLabel", GradientImageLabel)
 UIEngine.register("fixedComboBox",      FixedComboBox)
@@ -146,7 +146,7 @@ class VisualizerWindow(QWidget):
         self._visualizer_gain=1.0
         self._visualizer_attack=0.42
         self._visualizer_decay=0.020
-        self._visualizer_peak_decay=0.010
+        self._visualizer_peak_decay=0.005
         self._visualizer_min_visible_level=0.012
 
     def set_levels(self, levels: list[float], peaks: Optional[list[float]] = None) -> None:
@@ -194,6 +194,7 @@ class VisualizerWindow(QWidget):
 
     @visualizer_peak_decay.setter
     def visualizer_peak_decay(self, number:float):
+        print(self._visualizer_peak_decay)
         self._visualizer_peak_decay = number
 
     @Property(float)
@@ -341,7 +342,7 @@ class WaveformTask(QRunnable):
         stream_url: str,
         duration_ms: int,
         signals: WaveformSignals,
-        cookie_browser: str = "",
+        cookie_browser: str = "",proxy: Optional[dict] = None
     ) -> None:
         super().__init__()
         self.index = index
@@ -349,6 +350,7 @@ class WaveformTask(QRunnable):
         self.duration_ms = duration_ms
         self.cookie_browser = cookie_browser
         self.signals = signals
+        self.proxy=proxy
 
     @Slot()
     def run(self) -> None:
@@ -391,6 +393,7 @@ class WaveformTask(QRunnable):
             "-nostdin",
             "-reconnect",
             "1",
+       #     "-http_proxy", "http://127.0.0.1:2080",
             "-reconnect_streamed",
             "1",
             "-reconnect_delay_max",
@@ -516,12 +519,17 @@ class PlayerWindow(SkinManager,AudioController):
         self.resize(820, 760)
 
         self.setWindowIcon(QIcon("resources/MSMPicon.png"))
-
         self.events = PlayerEvents()
+
+        self.cookie_data = ["", "firefox", "chrome", "chromium", "brave", "edge"]
 
         self.db = AudioStatsDb(db_name=os.path.join(LocalSaveDir(),"music.db"))
 
         self.config=LoadConfigYaml()
+        self.proxy=utils.proxyManager(self.config.get("proxy"))
+
+        self.proxy.restartWithProxy(self)
+
         print(self.config)
         if not(skin=="default"):
             self.config["skin"]=skin
@@ -539,7 +547,7 @@ class PlayerWindow(SkinManager,AudioController):
         self.resolve_autoplay = None
         self.play_mode_index = 0
         self.error_boxes: list[QMessageBox] = []
-        self.playlist_title = "MSMP5 Playlist"
+        self.playlist_title = "MSMP6 Playlist"
         self.playlist_image_url = "https://msmp.maxsspeaker.space/static/img/Missing.png"
 
 
@@ -607,9 +615,6 @@ class PlayerWindow(SkinManager,AudioController):
         
         return super().eventFilter(obj, event)
 
-    def change_cookie_browser(self):
-        self.config["cookies"]={"browser":self.cookie_browser.currentData() or "","selected":self.cookie_browser.currentIndex()}
-
     def resizeEvent(self, event):
         super().resizeEvent(event)
 
@@ -675,6 +680,7 @@ class PlayerWindow(SkinManager,AudioController):
             self.playlist[index],
             self.resolve_signals,
             self.config["cookies"]["browser"],
+            proxy=self.proxy.get(),
             type=type
         ))
 
@@ -829,12 +835,6 @@ class PlayerWindow(SkinManager,AudioController):
     def refresh_table(self) -> None:
         self.table.clearPlaylistView()
         self.table.setPlaylist(self.playlist)
-        #for row, item in enumerate(self.playlist):
-        #    self.table.insertRow(row)
-        #    self.table.update_row(row, item)
-
-        #if self.table.current_index is not None and self.table.current_index < len(self.playlist):
-        #    self.table.selectRow(self.table.current_index)
 
     def play_selected_or_current(self) -> None:
         selected = self.table.currentRow()
@@ -975,7 +975,21 @@ class PlayerWindow(SkinManager,AudioController):
             self.play_index(0)
             return
 
+
+        attempts = 0  
         previous_index = (self.table.current_index - 1) % len(self.playlist)
+        attempts = 0  
+
+        while attempts < len(self.playlist):
+            if self.playlist[previous_index].unavailable:
+                previous_index = (previous_index - 1) % len(self.playlist)
+                attempts += 1
+                continue
+            break
+        else:
+            return 
+
+
         self.play_index(previous_index)
 
     def remove_selected(self) -> None:
@@ -1013,6 +1027,7 @@ class PlayerWindow(SkinManager,AudioController):
         self.table.current_index = None
         self.table.clearPlaylistView()
         self.position_slider.setRange(0, 0)
+        self.playlist_title = "MSMP6 Playlist"
         self.set_metaData(
             time_possition="0:00",
             time_end="0:00",
@@ -1137,33 +1152,13 @@ class PlayerWindow(SkinManager,AudioController):
             tracks = data.get("playlist")
             if not isinstance(tracks, list):
                 raise ValueError("MSMP playlist must contain a playlist array")
-            return [self.from_playlist_entry(entry) for entry in tracks if isinstance(entry, dict)]
+            return [from_playlist_entry(entry) for entry in tracks if isinstance(entry, dict)]
 
         if isinstance(data, list):
             self.playlist_title = "MSMP5 Playlist"
-            return [self.from_playlist_entry(entry) for entry in data if isinstance(entry, dict)]
+            return [from_playlist_entry(entry) for entry in data if isinstance(entry, dict)]
 
         raise ValueError("Playlist file must contain a JSON object or array")
-
-    @staticmethod
-    def from_playlist_entry(entry: dict) -> PlaylistItem:
-        page_url = entry.get("url") or entry.get("page_url")
-        if not page_url:
-            raise ValueError("Playlist entry has no url")
-
-        title = entry.get("name") or entry.get("title") or page_url
-        return PlaylistItem(
-            page_url=str(page_url),
-            title=str(title),
-            duration=int(entry.get("duration") or 0),
-            source_id=str(entry.get("ID") or entry.get("source_id") or "yt-dlp"),
-            uploader=str(entry.get("uploader") or ""),
-            album=str(entry.get("album") or ""),
-            artwork_url=str(entry.get("artwork_url") or entry.get("thumbnail") or ""),
-            publis=bool(entry.get("Publis") or entry.get("publis") or False),
-            unavailable=bool(entry.get("Unavailable") or entry.get("unavailable") or False),
-            load_error=str(entry.get("load_error") or ""),
-        )
 
     def update_current_metadata(self, item: PlaylistItem) -> None:
         self.set_metaData(
@@ -1368,8 +1363,15 @@ class PlayerWindow(SkinManager,AudioController):
             return random.randrange(len(self.playlist))
 
         next_index = self.table.current_index + 1
-        if next_index < len(self.playlist):
-            return next_index
+        while True:
+            if next_index < len(self.playlist):
+                if (self.playlist[next_index].unavailable):
+                    next_index = next_index + 1
+                    continue
+                return next_index
+            else:
+                break
+
         if mode == "All":
             return 0
         return None
@@ -1423,6 +1425,7 @@ class PlayerWindow(SkinManager,AudioController):
         if self.restart_attempts >= self.MAX_RESTARTS:
             self.status_label.setText(f"Playback failed: {error_string}")
             self.set_mpris_playback_status("Stopped")
+
             #QMessageBox.warning(self, "Playback error", error_string)
             return
 
@@ -1563,7 +1566,7 @@ class PlayerWindow(SkinManager,AudioController):
             if value < self.visualizer_window._visualizer_min_visible_level:
                 value = 0.0
 
-            peak = max(value, previous_peak - self.visualizer_window._visualizer_decay)
+            peak = max(value, previous_peak - self.visualizer_window._visualizer_peak_decay)
 
             smoothed.append(value)
             peaks.append(peak)
@@ -1773,7 +1776,7 @@ def main() -> int:
     ERROR_REPORTER = ErrorReporter()
     install_exception_hooks()
 
-    sys.excepthook
+    #sys.excepthook
     window = PlayerWindow(args.skin)
     if args.fullscreen:
         window.showFullScreen()

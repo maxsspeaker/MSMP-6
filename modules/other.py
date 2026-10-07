@@ -2,11 +2,11 @@ import random,hashlib
 import os,sys
 from PySide6.QtWidgets import (
     QApplication, QWidget, QPushButton, QVBoxLayout,QTableWidget, QProgressBar,
-    QHBoxLayout, QGraphicsOpacityEffect, QLabel, QGraphicsBlurEffect,QComboBox,QFrame,QStyleOptionViewItem,QListView,QStyledItemDelegate, QStyle,QMenu, QStyleOption,QTableWidgetItem,QAbstractItemView
+    QHBoxLayout, QGraphicsOpacityEffect, QLabel, QGraphicsBlurEffect,QComboBox,QFrame,QStyleOptionViewItem,QListView,QStyledItemDelegate, QStyle,QMenu, QStyleOption,QTableWidgetItem,QAbstractItemView,QSizePolicy
 )
 from PySide6.QtGui import QColor,QPixmap, QPainter, QLinearGradient, QImage,QPalette, QPen, QBrush,QAction,QFont,QPalette
 from PySide6.QtCore import QPropertyAnimation, QRect, QEasingCurve, Qt, Signal,QObject, QProcess,QParallelAnimationGroup,QSize, Slot,QPersistentModelIndex,Property
-from PySide6.QtMultimedia import QAudioOutput, QMediaDevices, QMediaPlayer,QAudioBufferOutput
+from PySide6.QtMultimedia import QAudioOutput, QMediaDevices, QMediaPlayer,QAudioBufferOutput, QAudioDevice
 from modules.types import PlaylistItem
 import __main__ 
 import re
@@ -108,6 +108,8 @@ class AudioController():
 
     def _init_player(self):
 
+        self.default_device = True
+
         self.player = QMediaPlayer(self)
         self.audio_output = QAudioOutput(self)
         self.audio_buffer_output = QAudioBufferOutput(self)
@@ -119,12 +121,31 @@ class AudioController():
 
         self.media_devices.audioOutputsChanged.connect(self._update_to_default_device)
 
+        print("Доступные устройства:")
+        for index, dev in enumerate(self.get_output_devices()):
+            print(f"[{index}] {dev.description()}")
+
+
         self._update_to_default_device()
+
+    def get_output_devices(self):
+        return self.media_devices.audioOutputs()
+
+    def switch_device(self, device: QAudioDevice):
+        """Легкий метод переключения устройства вывода."""
+        self.current_device = device
+        self.default_device = False
+        
+        self.audio_output.setDevice(self.current_device)
+
 
     def _update_to_default_device(self):
         default_device = QMediaDevices.defaultAudioOutput()
-        self.audio_output.setDevice(default_device)
-        print(f"Устройство вывода установлено на: {default_device.description()}")
+        if(self.default_device):
+            self.audio_output.setDevice(default_device)
+            print(f"Устройство вывода установлено на: {default_device.description()}")
+        else:
+            self.audio_output.setDevice(self.current_device)
 
 
 class LoadingOverlay(QWidget):
@@ -708,7 +729,7 @@ class SystemMenuBar(QWidget):
         if isinstance(parent, QMenu):
             self._ensure_visible_chain(parent)
 
-    def add_action(self, target_menu: QMenu | str, action_text: str, trigger_slot=None) -> QAction:
+    def add_action(self, target_menu: QMenu | str, action_text: str, trigger_slot=None,Checkable=False) -> QAction:
         if isinstance(target_menu, str):
             if target_menu not in self.menus:
                 self.add_menu(target_menu)
@@ -718,7 +739,10 @@ class SystemMenuBar(QWidget):
             
         action = QAction(action_text, self)
         if trigger_slot:
-            action.triggered.connect(trigger_slot)
+            if(Checkable):
+                action.toggled.connect(trigger_slot)
+            else:
+                action.triggered.connect(trigger_slot)
             
         parent_menu.addAction(action)
         self._ensure_visible_chain(parent_menu)
@@ -750,6 +774,26 @@ class SystemMenuBar(QWidget):
         self.style().drawPrimitive(QStyle.PrimitiveElement.PE_Widget, opt, p, self)
         super().paintEvent(event)
 
+
+
+def from_playlist_entry(entry: dict) -> PlaylistItem:
+        page_url = entry.get("url") or entry.get("page_url")
+        if not page_url:
+            raise ValueError("Playlist entry has no url")
+
+        title = entry.get("name") or entry.get("title") or page_url
+        return PlaylistItem(
+            page_url=str(page_url),
+            title=str(title),
+            duration=int(entry.get("duration") or 0),
+            source_id=str(entry.get("ID") or entry.get("source_id") or "yt-dlp"),
+            uploader=str(entry.get("uploader") or ""),
+            album=str(entry.get("album") or ""),
+            artwork_url=str(entry.get("artwork_url") or entry.get("thumbnail") or ""),
+            publis=bool(entry.get("Publis") or entry.get("publis") or False),
+            unavailable=bool(entry.get("Unavailable") or entry.get("unavailable") or False),
+            load_error=str(entry.get("load_error") or ""),
+        )
 
 
 def LocalSaveDir():

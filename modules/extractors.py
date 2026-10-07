@@ -168,6 +168,11 @@ def build_ytdlp_browser_args(cookie_browser: str) -> list[str]:
     return ["--cookies-from-browser", browser]
 
 
+def build_ytdlp_proxy_args(proxy: dict) -> list[str]:
+    if(proxy=={}):
+        return []
+    return ["--proxy",f"socks5://{proxy["host"]}:{proxy["port"]}/"]
+
 class YtdlpLogger:
     def __init__(self,status=None):
         self.status=status
@@ -198,7 +203,7 @@ class ResolveTask(QRunnable):
         index: int,
         url: str,
         signals: ResolveSignals,
-        cookie_browser: str = "",type=None
+        cookie_browser: str = "",proxy:dict = {},type=None
     ) -> None:
         super().__init__()
         self.index = index
@@ -207,6 +212,7 @@ class ResolveTask(QRunnable):
         self.url = url
         self.type=type
         self._cancelled=False
+        self.proxy=proxy
 
     @Slot()
     def run(self) -> None:
@@ -220,6 +226,7 @@ class ResolveTask(QRunnable):
             else:
                 print("Resolving audio")
 
+
             args = [
                 "--no-quiet",
                 "--no-warnings",
@@ -227,16 +234,15 @@ class ResolveTask(QRunnable):
                 "--flat-playlist",
                 "--dump-single-json",
                 "--no-check-certificates",
-           #     "--proxy","socks5://127.0.0.1:2080/", - for tests proxy
+                *build_ytdlp_proxy_args(self.proxy),
                 "--retries",
                 "3",
                 "--fragment-retries",
                 "3",
                 *build_ytdlp_browser_args(self.cookie_browser),
             ]
-            print("".join(args))
-
-
+            print(" ".join(args), flush=True)
+            
             if (self.type=="playlist"):
                 args.append("--")
                 args.append(self.url)
@@ -251,8 +257,7 @@ class ResolveTask(QRunnable):
 
             if(data.get("canceled")):
                 return
-
-
+                
             if not isinstance(data, dict):
                 raise RuntimeError("yt-dlp returned an empty or invalid response")
 
@@ -272,6 +277,7 @@ class ResolveTask(QRunnable):
                 uploader=data.get("uploader") or data.get("channel") or "",
                 album=data.get("album") or "",
                 artwork_url=data.get("thumbnail") or "",
+                media_type=data.get("media_type") or "audio",
             )
             if data.get('available_at'):
                 print(data.get('available_at')-time.time())
@@ -330,6 +336,8 @@ class ResolveTask(QRunnable):
 
         elif self._proc.returncode != 0:
             message = self._proc.stderr.readline() or f"yt-dlp exited with code {self._proc.returncode}"
+            if(message==None):
+                raise RuntimeError(f"yt-dlp exited with code {self._proc.returncode}")
             raise RuntimeError(message)
 
         payload = json_data

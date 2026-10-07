@@ -132,9 +132,6 @@
                        placeholder="URL for yt-dlp"
                        stretch="1" />
 
-            <fixedComboBox id="cookie_browser"
-                           items="No cookies,Firefox cookies,Chrome cookies,Chromium cookies,Brave cookies,Edge cookies" />
-
             <qpushbutton id="clear_button" text="Clear" connect="clear_playlist" />
             <qpushbutton id="save_button"  text="Save"  connect="save_playlist" />
             <qpushbutton id="load_button"  text="Load"  connect="load_playlist" />

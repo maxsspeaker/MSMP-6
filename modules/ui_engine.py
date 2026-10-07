@@ -748,13 +748,12 @@ class SkinManager(QMainWindow):
         self.ui = self._engine.widgets
 
         # ── Ссылки на виджеты (совместимость с остальным кодом) ───────────
-        self.NowDisplay          = self.ui["NowDisplay"]
+        #self.NowDisplay          = self.ui["NowDisplay"]
         self.position_slider     = self.ui["position_slider"]
         self.volume_slider       = self.ui["volume_slider"]
         self.status_label        = self.ui["status_label"]
         self.url_input           = self.ui["url_input"]
         #self.add_button          = self.ui["add_button"]
-        self.cookie_browser      = self.ui["cookie_browser"]
         #self.clear_button        = self.ui["clear_button"]
         #self.save_button         = self.ui["save_button"]
         #self.load_button         = self.ui["load_button"]
@@ -773,27 +772,8 @@ class SkinManager(QMainWindow):
         else:
             self.table = self.ui["playlist_table"]
 
+        self._setup_MainMenuBar()
 
-        file_menu = self.MainMenuBar.add_menu("Menu")
-        file_menu.addAction("About",lambda:AboutWindow(self).exec())
-
-        setup_menu=self.MainMenuBar.add_menu("Options")
-        skin_menu=self.MainMenuBar.add_submenu(setup_menu, "Skins", hide_if_empty=False)
-
-        for skin in sorted(os.listdir(os.path.join(os.path.dirname(sys.modules['__main__'].__file__), "skins"))):
-           skin_menu.addAction(skin, lambda s=skin: self.set_skin(s)) 
-
-        if not hasattr(self, "PluginMenu"):
-            self.PluginMenu=self.MainMenuBar.add_submenu(setup_menu, "Plugins")
-            self.PluginMenu.setParent(self, self.PluginMenu.windowFlags())
-
-            self.PlguinMenu=self.PluginMenu #!!! legacy БУДЕТ УБРАНО В 6.0.4 исправьте кастомные скины!!!
-        else:
-            setup_menu.addMenu(self.PluginMenu)
-
-        file_menu.addSeparator()
-        file_menu.addAction("Exit", self.close)
-        file_menu.addSeparator()
 
         self.visualizer_window = self.ui.get("visualizer_window")
 
@@ -830,13 +810,6 @@ class SkinManager(QMainWindow):
 
 
         self.mode_button.setIcon(QIcon(self.PLAY_MODES_icons[self.play_mode_index]))
-
-        # ── Донастройка cookie_browser (userData для элементов) ───────────
-        cookie_data = ["", "firefox", "chrome", "chromium", "brave", "edge"]
-        for i, data in enumerate(cookie_data):
-            self.cookie_browser.setItemData(i, data)
-        self.cookie_browser.setCurrentIndex(self.config["cookies"]["selected"])
-        self.cookie_browser.currentIndexChanged.connect(self.change_cookie_browser)
 
         # ── Дополнительный connect для url_input (returnPressed) ──────────
         self.url_input.returnPressed.connect(self.add_url)
@@ -899,6 +872,61 @@ class SkinManager(QMainWindow):
         except AttributeError:
             pass
 
+    def _setup_MainMenuBar(self):
+        file_menu = self.MainMenuBar.add_menu("Menu")
+        file_menu.addAction("About",lambda:AboutWindow(self).exec())
+
+        setup_menu=self.MainMenuBar.add_menu("Options")
+        skin_menu=self.MainMenuBar.add_submenu(setup_menu, "Skins", hide_if_empty=False)
+        self.cookie_menu=self.MainMenuBar.add_submenu(setup_menu, "Cookies mode ", hide_if_empty=False)
+
+        for skin in sorted(os.listdir(os.path.join(os.path.dirname(sys.modules['__main__'].__file__), "skins"))):
+           skin_menu.addAction(skin, lambda s=skin: self.set_skin(s)) 
+
+        # ── Донастройка cookie_browser (userData для элементов) ───────────
+        for i, data in enumerate(self.cookie_data):
+            if(i==0):
+                continue
+
+            action = QAction(data, self)
+            action.setCheckable(True)  # Делаем пункт с галочкой
+            action.setChecked(data==self.config["cookies"]["browser"])
+            action.toggled.connect(lambda checked,s=data,index=i: self.change_cookie_mode(checked,s,index))
+            self.cookie_menu.addAction(action)
+
+        if not hasattr(self, "PluginMenu"):
+            self.PluginMenu=self.MainMenuBar.add_submenu(setup_menu, "Plugins")
+            self.PluginMenu.setParent(self, self.PluginMenu.windowFlags())
+
+            self.PlguinMenu=self.PluginMenu #!!! legacy БУДЕТ УБРАНО В 6.0.4 исправьте кастомные скины!!!
+        else:
+            setup_menu.addMenu(self.PluginMenu)
+
+
+
+        file_menu.addSeparator()
+        file_menu.addAction("Exit", self.close)
+        file_menu.addSeparator()
+
+    #change_cookie_browser
+        
+
+    def change_cookie_mode(self,checked,mode,index):
+        for action in self.cookie_menu.actions():
+            if action.isSeparator():
+                continue
+            if(mode==action.text()):
+                continue
+            action.blockSignals(True)
+            action.setChecked(False)
+            action.blockSignals(False)
+
+        print(checked)
+        if(checked):
+            self.config["cookies"]={"browser":mode or "","selected":index}
+        else:
+            self.config["cookies"]={"browser":"" or "","selected":0}
+
     def set_cover_placeholder(self) -> None:
         cover_label = self.ui.get("cover_label")
         cover_background = self.ui.get("cover_background")
@@ -914,7 +942,10 @@ class SkinManager(QMainWindow):
             time_possition_label=self.ui.get("time_possition_label")
             time_end_label=self.ui.get("time_end_label")
             if(time_label):
-                time_label.setText(f"{time_possition} / {time_end}")
+                if (time_end=="0:00"):
+                    time_label.setText(f"{time_possition}")
+                else:
+                    time_label.setText(f"{time_possition} / {time_end}")
             if(time_possition_label):
                 time_possition_label.setText(f"{time_possition}")
             if(time_end_label):

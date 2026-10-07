@@ -16,6 +16,7 @@ class PlaylistItem:
     publis: bool = False
     unavailable: bool = False
     load_error: str = ""
+    media_type: str = "audio"
     waveform: list[float] = field(default_factory=list)
     waveform_ready: bool = False
 

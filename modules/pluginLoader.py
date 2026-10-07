@@ -102,13 +102,14 @@ class PluginLoader:
                     item: PlaylistItem,
                     signals:  extractors.ResolveSignals,
                     cookie_browser: str = "",
+                    proxy:dict = {},
                     type=None
                 ):
         for extractor in self.extractor_plugins:
             if(extractor.source==item.source_id):
-                return extractor.ResolveTask(index,item.page_url,signals,extractor.session)
+                return extractor.ResolveTask(index,item.page_url,signals,extractor.session,proxy)
                 
-        return extractors.ResolveTask(index,item.page_url,signals,cookie_browser,type=type)
+        return extractors.ResolveTask(index,item.page_url,signals,cookie_browser,proxy=proxy,type=type)
 
     def findPL_resolver(self,
                     index: int,

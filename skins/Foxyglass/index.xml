@@ -63,8 +63,8 @@
             </qwidget>
 
             <!-- Визуализатор -->
-            <visualizerWindow id="visualizer_window"
-                              fixed-width="233" fixed-height="128" />
+            <visualizerWindow margin="135" id="visualizer_window"
+                              fixed-width="233" fixed-height="110" />
 
         </qwidget>
 
@@ -131,9 +131,6 @@
             <qlineedit id="url_input"
                        placeholder="URL for yt-dlp"
                        stretch="1" />
-
-            <fixedComboBox id="cookie_browser"
-                           items="No cookies,Firefox cookies,Chrome cookies,Chromium cookies,Brave cookies,Edge cookies" />
 
             <qpushbutton id="clear_button" text="Clear" connect="clear_playlist" />
             <qpushbutton id="save_button"  text="Save"  connect="save_playlist" />
