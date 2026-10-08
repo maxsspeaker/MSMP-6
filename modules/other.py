@@ -315,6 +315,15 @@ class PlaylistWidget(QTableWidget):
         if self.current_index is not None and self.current_index < len(self.playlist):
             self.selectRow(self.current_index)
 
+    def mouseDoubleClickEvent(self, event):
+        # Получаем элемент под курсором
+        item = self.itemAt(event.pos())
+        if item:
+            # Принудительно вызываем сигнал двойного клика, обходя баги InternalMove
+            self.cellDoubleClicked.emit(item.row(), item.column())
+            
+        super().mouseDoubleClickEvent(event)
+
 
     def update_row(self, row: int, item: PlaylistItem) -> None:
         # Генерируем маленький ID, если видим элемент впервые
@@ -334,6 +343,10 @@ class PlaylistWidget(QTableWidget):
             track_item = QTableWidgetItem(f"{item.title}\n{artist}")
         track_item.setData(Qt.UserRole, item.page_url)
         length_item = QTableWidgetItem(self.format_time(item.duration * 1000))
+
+        track_item.setFlags(track_item.flags() & ~Qt.ItemIsEditable)
+        length_item.setFlags(length_item.flags() & ~Qt.ItemIsEditable)
+        
         self.setItem(row, 0, track_item)
         self.setItem(row, 1, length_item)
         self.setRowHeight(row, self.rowHeight)

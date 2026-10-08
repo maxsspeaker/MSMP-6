@@ -66,7 +66,7 @@ from PySide6.QtWidgets import (
 )
 from modules.other import GradientImageLabel,FixedComboBox,SystemMenuBar,get_ffmpeg_executable,LocalSaveDir,PlaylistWidget,AudioController,LoadConfigYaml,from_playlist_entry
 from modules.types import *
-from modules.pluginLoader import PluginLoader
+from modules.pluginLoader import PluginLoader,PluginManagerWidget
 from modules.dbus import MprisServer
 from modules.ui_engine import UIEngine,SkinManager,WaveformSeekBar,WAVEFORM_BIN_COUNT,WAVEFORM_HEIGHT
 from modules.AudioStatsDb import AudioStatsDb
@@ -537,8 +537,8 @@ class PlayerWindow(SkinManager,AudioController):
         if (sys.platform == "linux"):
             os.environ["QT_AUDIO_BACKEND"] =  os.environ.get("QT_AUDIO_BACKEND",self.config.get("AUDIO_BACKEND","PulseAudio"))
 
-        self.plugin_loader = PluginLoader()
-        self.plugin_loader.load_all(context=self)
+        self.plugin_loader = PluginLoader(self.config)
+        self.plugin_loader.load_allowed(context=self)
 
         self.playlist: list[PlaylistItem] = []
         self.pending_position = 0
@@ -582,6 +582,8 @@ class PlayerWindow(SkinManager,AudioController):
 
         self._init_player()
 
+        self._plugin_manager=PluginManagerWidget(self.plugin_loader.plugins_dir,self.config)
+
         self._init_ui()
 
         self.player.positionChanged.connect(self.on_position_changed)
@@ -597,6 +599,7 @@ class PlayerWindow(SkinManager,AudioController):
         self.setup_mpris()
 
         self.plugin_loader.init_all(context=self)
+
 
         if(os.path.isfile(os.path.join(LocalSaveDir(),"autosave.plmsmpsbox"))):
             self.load_playlist(path=os.path.join(LocalSaveDir(),"autosave.plmsmpsbox"),isautosave=True)

@@ -880,6 +880,8 @@ class SkinManager(QMainWindow):
         skin_menu=self.MainMenuBar.add_submenu(setup_menu, "Skins", hide_if_empty=False)
         self.cookie_menu=self.MainMenuBar.add_submenu(setup_menu, "Cookies mode ", hide_if_empty=False)
 
+        setup_menu.addAction("Plugin manager", lambda:self._plugin_manager.show()) 
+
         for skin in sorted(os.listdir(os.path.join(os.path.dirname(sys.modules['__main__'].__file__), "skins"))):
            skin_menu.addAction(skin, lambda s=skin: self.set_skin(s)) 
 
