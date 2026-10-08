@@ -12,9 +12,9 @@ class ExamplePlugin(PluginBase):
     def init_plugin(self):
         self.my_folder = os.path.dirname(__file__)
 
-        self.StarFildMenu=self.main_window.MainMenuBar.add_submenu(self.main_window.PluginMenu, "hello_world_plugin", hide_if_empty=False)
+        self.ExamplePluginMenu=self.main_window.MainMenuBar.add_submenu(self.main_window.PluginMenu, "hello_world_plugin", hide_if_empty=False)
 
-        self.StarFildMenu.addAction("Show Message", self.show_dialog)
+        self.ExamplePluginMenu.addAction("Show Message", self.show_dialog)
 
     def show_dialog(self):
         QMessageBox.information(
@@ -30,7 +30,19 @@ MSMP-FoxWave/
 └── plugins/               <-- Plguin folder
     └── hello_world_plugin/
         ├── index.py       <-- main plugin file
-        └── helper.py      <-- yours other local modules
+        ├── helper.py      <-- yours other local modules
+        ├── meta.json      <-- your inforamtion for plugin manager (important after 6.1.0!)
+        └── icon.png       <-- your icon for plugin manager
+```
+## meta.json example:
+```
+{
+    "Name":"My first cool plugin",
+    "Description":"My very very first cool plugin!",
+    "Author":"Maxsspeaker",
+    "Id":"space.maxsspeaker.my-first-cool-plugin",
+    "dependencies":[]
+}
 ```
 ```
     # События кнопок

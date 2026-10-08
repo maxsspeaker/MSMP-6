@@ -181,7 +181,7 @@ class PluginManagerWidget(QWidget):
 
         self.config=config
         self.plugins_data = {}   
-        self.initial_states = {} # Состояние чекбоксов ПРИ ЗАПУСКЕ (для проверки необходимости перезагрузки)
+        self.initial_states = {}
         self.ui_items = {}       
 
         self.setStyleSheet("""
@@ -209,25 +209,15 @@ class PluginManagerWidget(QWidget):
             QCheckBox::indicator:checked { background: #555; }
         """)
 
-        #self._load_settings()    
         self._load_plugins()     
         
         # Фиксируем начальное состояние для проверки перезагрузки
         self.initial_states = dict(self.config["plugins"])
-
         
         self._init_ui()
         self._populate_list()
         self._update_all_colors() 
-        self._apply_filters() # Применяем фильтры (на случай если что-то выбрано по умолчанию)
-
-    def _load_settings(self):
-        if self.settings_file.exists():
-            try:
-                with open(self.settings_file, "r", encoding="utf-8") as f:
-                    self.config["plugins"] = json.load(f)
-            except Exception as e:
-                print(f"Ошибка чтения настроек: {e}")
+        self._apply_filters()
 
     def _save_settings(self):
         with open(self.settings_file, "w", encoding="utf-8") as f:
