@@ -469,7 +469,7 @@ class WaveformTask(QRunnable):
 
 # Регистрируем кастомные виджеты после их объявления
 UIEngine.register("visualizerWindow", VisualizerWindow)
-UIEngine.register("qtablewidget", PlaylistWidget) #!!! legacy БУДЕТ УБРАНО В 6.0.4 исправьте кастомные скины!!!!
+UIEngine.register("qtablewidget", PlaylistWidget) #!!! legacy БУДЕТ УБРАНО В 6.1.1 исправьте кастомные скины!!!!
 UIEngine.register("playlistwidget", PlaylistWidget)
 
 class PlayerWindow(SkinManager,AudioController):

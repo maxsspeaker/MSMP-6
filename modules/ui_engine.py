@@ -768,7 +768,7 @@ class SkinManager(QMainWindow):
         self.MainMenuBar         = self.ui["MainMenuBar"]
 
         if not(self.ui.get("playlist_table")): 
-            self.table = self.ui["table"] #!!! legacy БУДЕТ УБРАНО В 6.0.4 исправьте кастомные скины!!!
+            self.table = self.ui["table"] #!!! legacy БУДЕТ УБРАНО В 6.1.1 исправьте кастомные скины!!!
         else:
             self.table = self.ui["playlist_table"]
 
@@ -900,7 +900,7 @@ class SkinManager(QMainWindow):
             self.PluginMenu=self.MainMenuBar.add_submenu(setup_menu, "Plugins")
             self.PluginMenu.setParent(self, self.PluginMenu.windowFlags())
 
-            self.PlguinMenu=self.PluginMenu #!!! legacy БУДЕТ УБРАНО В 6.0.4 исправьте кастомные скины!!!
+            self.PlguinMenu=self.PluginMenu #!!! legacy БУДЕТ УБРАНО В 6.1.1 исправьте кастомные скины!!!
         else:
             setup_menu.addMenu(self.PluginMenu)
 
