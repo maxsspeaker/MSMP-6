@@ -342,7 +342,7 @@ class WaveformTask(QRunnable):
         stream_url: str,
         duration_ms: int,
         signals: WaveformSignals,
-        cookie_browser: str = "",proxy: Optional[dict] = None
+        cookie_browser: str = "",proxy: dict = {}
     ) -> None:
         super().__init__()
         self.index = index
