@@ -48,8 +48,8 @@ class PluginLoader:
                         box = QMessageBox()
                         box.setIcon(QMessageBox.Critical)
                         box.setWindowTitle("Plugin Manager")
-                        #box.setText("Plugin "+str(plugin_id))
-                        box.setDetailedText("".join(traceback.format_exception(exc_type, exc_value, exc_traceback)))
+                        box.setText(details)#"Plugin "+str(plugin_id))
+                        #box.setDetailedText(details)
                         box.exec()
 
 
@@ -79,18 +79,9 @@ class PluginLoader:
                 except:
                     continue
 
-                try:
-                    if(self.config["plugins"].get(plugin_id)):
-                        if os.path.exists(os.path.join(item_path, "index.py")):
-                            self._load_plugin_from_folder(item, context)
-                except:
-                    self.config["plugins"][plugin_id]=False
-                    box = QMessageBox()
-                    box.setIcon(QMessageBox.Critical)
-                    box.setWindowTitle("Plugin Manager")
-                    box.setText("Plugin "+str(plugin_id))
-                    box.setDetailedText("".join(traceback.format_exception(exc_type, exc_value, exc_traceback)))
-                    box.exec()
+                if(self.config["plugins"].get(plugin_id)):
+                    if os.path.exists(os.path.join(item_path, "index.py")):
+                        self._load_plugin_from_folder(item, context)
 
     def _load_plugin_from_folder(self, folder_name, context):
         try:

@@ -182,7 +182,7 @@ class VisualizerWindow(QWidget):
 
     @Property(float)
     def visualizer_decay(self):
-        return self._bar_color_high
+        return self._visualizer_decay
 
     @visualizer_decay.setter
     def visualizer_decay(self, number:float):
