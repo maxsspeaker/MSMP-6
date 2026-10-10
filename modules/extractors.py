@@ -8,16 +8,15 @@ import json
 import shutil
 from .types import *
 import re,time
+import locale
+
 
 
 class ResolveSignals(QObject):
-    resolved = Signal(int, object)
-    failed = Signal(int, str, str)
-
-class JamPlaylistSignals(QObject):
+    resolved = Signal(object, object)
     parsed = Signal(int, object, str)
     status = Signal(str)
-    failed = Signal(int, str, str)
+    failed = Signal(object, str, str)
 
 
 def parse_youtube_link(url):
@@ -115,17 +114,18 @@ def extract_youtube_video_id(page_url: str) -> str:
 
 def run_external_ytdlp(
     args: list[str],
-    status=None,
-) -> dict:
+    status=None) -> dict:
     executable = get_ytdlp_executable()
-    cmd = [executable, *args]
+    cmd = [executable,"--encoding", "UTF-8", *args]
     CREATE_NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0) if sys.platform == "win32" else 0
+    custom_env = dict(os.environ)
+    custom_env.pop("LD_PRELOAD", None)
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,   
-        stderr=subprocess.PIPE, # Сливаем потоки, чтобы читать всё из stdout
+        stderr=subprocess.PIPE,
         text=True,
-        encoding="utf-8",creationflags=CREATE_NO_WINDOW
+        encoding="utf-8",creationflags=CREATE_NO_WINDOW,env=custom_env
         )
     json_data=None
 
@@ -147,6 +147,8 @@ def run_external_ytdlp(
 
     if proc.returncode != 0:
         message = proc.stderr.readline() or f"yt-dlp exited with code {proc.returncode}"
+        if(message==""):
+            raise RuntimeError("unknow error, check logs")
         raise RuntimeError(message)
 
     payload = json_data
@@ -165,40 +167,65 @@ def build_ytdlp_browser_args(cookie_browser: str) -> list[str]:
         return []
     return ["--cookies-from-browser", browser]
 
-class JamPlaylistTask(QRunnable):
+
+def build_ytdlp_proxy_args(proxy: dict) -> list[str]:
+    if(proxy=={}):
+        return []
+    return ["--proxy",f"socks5://{proxy["host"]}:{proxy["port"]}/"]
+
+class YtdlpLogger:
+    def __init__(self,status=None):
+        self.status=status
+
+    def debug(self, message: str) -> None:
+        if(self.status):
+            self.status.emit(message)
+        print("yt-dlp: %s", message)
+        logging.debug("yt-dlp: %s", message)
+
+    def warning(self, message: str) -> None:
+        print("yt-dlp: %s", message)
+        logging.warning("yt-dlp: %s", message)
+
+    def error(self, message: str) -> None:
+        print("yt-dlp: %s", message)
+        logging.error("yt-dlp: %s", message)
+
+    def info(self, message: str) -> None:
+        print("yt-dlp: %s", message)
+        logging.info("yt-dlp: %s", message)
+
+
+
+class ResolveTask(QRunnable):
     def __init__(
         self,
-        index: Optional[int],
-        page_url: str,
-        signals: JamPlaylistSignals,
-        cookie_browser: str = "",
-        JamPlaylist: bool = True,
+        index: int,
+        url: str,
+        signals: ResolveSignals,
+        cookie_browser: str = "",proxy:dict = {},type=None
     ) -> None:
         super().__init__()
         self.index = index
-        self.page_url = page_url
         self.cookie_browser = cookie_browser
         self.signals = signals
-        self.JamPlaylist = JamPlaylist
+        self.url = url
+        self.type=type
+        self._cancelled=False
+        self.proxy=proxy
 
     @Slot()
     def run(self) -> None:
         try:
-            if self.JamPlaylist:
-                video_id = extract_youtube_video_id(self.page_url)
 
-                if not video_id:
-                    raise RuntimeError("Не удалось извлечь id видео из page_url")
-
-                jam_url = (
-                    "https://www.youtube.com/watch?v="
-                    f"{video_id}&list=RD{video_id}&start_radio=1"
-                )
+            if not(self.type):
+                self.type=self.noNameTypeDetector(self.url)
+            elif (self.type=="jamplaylist_youtube"):
+                self.url=self._makeJamPlaylist(self.url)
+                self.type="playlist"
             else:
-                jam_url = self.page_url
+                print("Resolving audio")
 
-            print(jam_url)
-            print("Resolving playlist")
 
             args = [
                 "--no-quiet",
@@ -207,16 +234,159 @@ class JamPlaylistTask(QRunnable):
                 "--flat-playlist",
                 "--dump-single-json",
                 "--no-check-certificates",
+                *build_ytdlp_proxy_args(self.proxy),
                 "--retries",
                 "3",
                 "--fragment-retries",
                 "3",
                 *build_ytdlp_browser_args(self.cookie_browser),
-                jam_url,
             ]
+            print(" ".join(args), flush=True)
+            
+            if (self.type=="playlist"):
+                args.append("--")
+                args.append(self.url)
+                data = self.run_external_ytdlp(args, status=self.signals.status)
+            else:
+                args.append("--format")
+                args.append("bestaudio/best")
+                args.append("--no-playlist")
+                args.append("--")
+                args.append(self.url)
+                data = self.run_external_ytdlp(args)
 
-            data = run_external_ytdlp(args, status=self.signals.status)
+            if(data.get("canceled")):
+                return
+                
+            if not isinstance(data, dict):
+                raise RuntimeError("yt-dlp returned an empty or invalid response")
 
+            if (self.type=="playlist"):
+                return self._formatPlaylist(data)
+
+            stream_url = self.best_stream_url(data)
+            if not stream_url:
+                raise RuntimeError("yt-dlp did not return a playable stream URL")
+
+            item = PlaylistItem(
+                page_url=self.url,
+                title=data.get("title") or self.url,
+                stream_url=stream_url,
+                duration=int(data.get("duration") or 0),
+                source_id=data.get("extractor_key") or data.get("extractor") or "yt-dlp",
+                uploader=data.get("uploader") or data.get("channel") or "",
+                album=data.get("album") or "",
+                artwork_url=data.get("thumbnail") or "",
+                media_type=data.get("media_type") or "audio",
+            )
+            if data.get('available_at'):
+                print(data.get('available_at')-time.time())
+                if(data.get('available_at')-time.time()>0):
+                    time.sleep(abs(data.get('available_at')-time.time()))
+            self.signals.resolved.emit(self.index, item)
+        except BaseException as exc:
+            error = self.format_error(exc)
+            details = traceback.format_exc()
+            try:
+                self.signals.failed.emit(self.index, error, details)
+            except RuntimeError:
+                print(details, file=sys.stderr, flush=True)
+
+
+    def run_external_ytdlp(self,args: list[str],status=None) -> dict:
+        executable = get_ytdlp_executable()
+        cmd = [executable, *args]
+        CREATE_NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0) if sys.platform == "win32" else 0
+        custom_env = dict(os.environ)
+        custom_env.pop("LD_PRELOAD", None)
+
+        if(sys.platform == "win32"):
+            encoding = locale.getpreferredencoding()
+        else:
+            encoding = "utf-8"
+
+        self._proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,   
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding=encoding,creationflags=CREATE_NO_WINDOW,env=custom_env,errors='replace'
+            )
+        json_data=None
+
+
+        while True:
+            line = self._proc.stdout.readline()
+                
+            if not line and self._proc.poll() is not None:
+                break
+                
+            if line:
+                if line.startswith('{'):
+                    json_data = line.strip()
+                else:
+                    if(status):
+                        status.emit(line.strip())
+                    print(line, end='')
+
+        self._proc.wait()
+
+        if self._proc.returncode == -9:
+            return {"canceled":True}
+
+        elif self._proc.returncode != 0:
+            message = self._proc.stderr.readline() or f"yt-dlp exited with code {self._proc.returncode}"
+            if(message==None):
+                raise RuntimeError(f"yt-dlp exited with code {self._proc.returncode}")
+            raise RuntimeError(message)
+
+        payload = json_data
+        if not payload:
+            raise RuntimeError("yt-dlp returned no data")
+
+        try:
+            return json.loads(json_data)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"Failed to parse yt-dlp JSON output: {exc}") from exc
+
+    def cancel(self) -> None:
+        self._cancelled = True
+        if self._proc is not None and self._proc.poll() is None:
+            self._proc.kill()  
+
+
+    def noNameTypeDetector(self,url):
+        args = [
+                "--simulate",
+                "--flat-playlist",
+                "--playlist-items","0",
+                "--no-playlist",
+                "--dump-single-json",
+                "--no-check-certificates",
+                "--retries","3",
+                *build_ytdlp_browser_args(self.cookie_browser),
+                "--",
+                url,
+            ]
+        print("Resolving no Name")
+
+        data = run_external_ytdlp(args, status=None)
+
+        if not isinstance(data, dict):
+                raise RuntimeError("yt-dlp returned an empty or invalid response")
+
+        return data["_type"]
+
+    @staticmethod
+    def _makeJamPlaylist(url) -> str:
+        video_id = extract_youtube_video_id(url)
+
+        if not video_id:
+            raise RuntimeError("Не удалось извлечь id видео из page_url")
+
+        return f"https://www.youtube.com/watch?v={video_id}&list=RD{video_id}&start_radio=1"
+
+    def _formatPlaylist(self,data) -> None:
             if not isinstance(data, dict):
                 raise RuntimeError("yt-dlp returned an empty or invalid playlist response")
 
@@ -262,13 +432,6 @@ class JamPlaylistTask(QRunnable):
 
             playlist_title = str(data.get("title") or "Jam playlist")
             self.signals.parsed.emit(self.index, items, playlist_title)
-        except BaseException as exc:
-            error = self.format_error(exc)
-            details = traceback.format_exc()
-            try:
-                self.signals.failed.emit(self.index, error, details)
-            except RuntimeError:
-                print(details, file=sys.stderr, flush=True)
 
     @staticmethod
     def format_error(exc: BaseException) -> str:
@@ -282,114 +445,10 @@ class JamPlaylistTask(QRunnable):
             )
         if not message:
             message = exc.__class__.__name__
+        elif(message=="argument of type 'bool' is not iterable"):
+            message = "Скачайте плагин для поддержки источника"
         return message
 
-
-class YtdlpLogger:
-    def __init__(self,status=None):
-        self.status=status
-
-    def debug(self, message: str) -> None:
-        if(self.status):
-            self.status.emit(message)
-        print("yt-dlp: %s", message)
-        logging.debug("yt-dlp: %s", message)
-
-    def warning(self, message: str) -> None:
-        print("yt-dlp: %s", message)
-        logging.warning("yt-dlp: %s", message)
-
-    def error(self, message: str) -> None:
-        print("yt-dlp: %s", message)
-        logging.error("yt-dlp: %s", message)
-
-    def info(self, message: str) -> None:
-        print("yt-dlp: %s", message)
-        logging.info("yt-dlp: %s", message)
-
-
-
-class ResolveTask(QRunnable):
-    def __init__(
-        self,
-        index: int,
-        url: str,
-        signals: ResolveSignals,
-        cookie_browser: str = "",
-    ) -> None:
-        super().__init__()
-        self.index = index
-        self.url = url
-        self.cookie_browser = cookie_browser
-        self.signals = signals
-
-    @Slot()
-    def run(self) -> None:
-        try:
-            print("Resolving audio")
-
-            args = [
-                "--no-quiet",
-                "--no-warnings",
-                "--skip-download",
-                "--dump-single-json",
-                "--no-playlist",
-                "--format",
-                "bestaudio/best",
-                "--no-check-certificates",
-                "--retries",
-                "3",
-                "--fragment-retries",
-                "3",
-                *build_ytdlp_browser_args(self.cookie_browser),
-                self.url,
-            ]
-
-            data = run_external_ytdlp(args, status=None)
-
-
-            if not isinstance(data, dict):
-                raise RuntimeError("yt-dlp returned an empty or invalid response")
-
-            stream_url = self.best_stream_url(data)
-            if not stream_url:
-                raise RuntimeError("yt-dlp did not return a playable stream URL")
-
-            item = PlaylistItem(
-                page_url=self.url,
-                title=data.get("title") or self.url,
-                stream_url=stream_url,
-                duration=int(data.get("duration") or 0),
-                source_id=data.get("extractor_key") or data.get("extractor") or "yt-dlp",
-                uploader=data.get("uploader") or data.get("channel") or "",
-                album=data.get("album") or "",
-                artwork_url=data.get("thumbnail") or "",
-            )
-            if data.get('available_at'):
-                if(data.get('available_at')-time.time()>0):
-                    time.sleep(data.get('available_at')-time.time())
-            self.signals.resolved.emit(self.index, item)
-        except BaseException as exc:
-            error = self.format_error(exc)
-            details = traceback.format_exc()
-            try:
-                self.signals.failed.emit(self.index, error, details)
-            except RuntimeError:
-                print(details, file=sys.stderr, flush=True)
-
-    @staticmethod
-    def format_error(exc: BaseException) -> str:
-        message = str(exc).strip()
-        if "ERROR:" in message:
-            message = message.removeprefix("ERROR:").strip()
-        if "HTTP Error 429" in message or "Too Many Requests" in message:
-            return (
-                "HTTP 429 Too Many Requests. Сервис временно ограничил запросы. "
-                "Попробуйте позже или выберите cookies браузера с активной сессией."
-            )
-        if not message:
-            message = exc.__class__.__name__
-        return message
 
     @staticmethod
     def best_stream_url(data: dict) -> str:
@@ -423,3 +482,26 @@ class ResolveTask(QRunnable):
             return abr, preference
 
         return max(audio_formats, key=score)["url"]
+
+
+
+class resolverControler():
+    def __init__(self,thread_pool):
+        self.thread_pool = thread_pool
+        self.resolving_indexes = {}
+
+
+    def addTask(self,index,task):
+        self.resolving_indexes[index]=task
+        task.setAutoDelete(True)
+        self.thread_pool.start(task)
+
+    def clear(self):
+        for index in self.resolving_indexes:
+            self.resolving_indexes[index].cancel()
+
+        self.resolving_indexes.clear()
+
+
+
+

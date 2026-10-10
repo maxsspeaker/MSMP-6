@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
-from PySide6.QtCore import QObject, Signal
-
+from PySide6.QtCore import QObject, Signal,QRunnable
+from typing import Optional
 
 
 @dataclass
@@ -16,6 +16,7 @@ class PlaylistItem:
     publis: bool = False
     unavailable: bool = False
     load_error: str = ""
+    media_type: str = "audio"
     waveform: list[float] = field(default_factory=list)
     waveform_ready: bool = False
 
@@ -30,7 +31,8 @@ class PlayerEvents(QObject):
 
     on_play_status_changed = Signal(str)       # Изменение состояния воспроизведения
     on_update_current_metadata = Signal(PlaylistItem)  # Обновление мета данных
-    on_sync_position = Signal(int)
+    on_sync_position = Signal(int)  # Синхронизация позиции времени
+    on_skin_changed = Signal(str) # изменение скина в реальном времени (изменение UI)
     
     # Файлы и данные
     on_playlist_opened = Signal(str, list)     # Передаем путь к плейлисту (str) и кол-во треков (int)
@@ -39,6 +41,11 @@ class PlayerEvents(QObject):
     # Жизненный цикл программы
     on_app_closing = Signal()                  # Программа закрывается 
 
+
+class CustomAudioResolver:
+    source: str
+    ResolveTask: QRunnable
+    session: Optional[object]
 
 
 class PluginBase:
@@ -61,3 +68,4 @@ class PluginBase:
         """
     #   Пример:
     #   sys.modules['__main__'].QAudioBufferOutput=QAudioBufferOutput
+

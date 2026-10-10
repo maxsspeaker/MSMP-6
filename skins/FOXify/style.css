@@ -1,5 +1,5 @@
 QMainWindow{
-    background: #191919;
+    background: #000;
     color: #eeeeee;
     font-family: "Noto Sans", "Segoe UI", sans-serif;
     font-size: 13px;
@@ -8,12 +8,15 @@ QMainWindow{
 #nowPlaying {
     background: #171717;
     border-bottom: 1px solid #232323;
-    color: #75614b;
 }
 
 #NowDisplay{
-    background: #555555;
+    background: #000000;
     border radius:16px;
+}
+
+#playlistMenu{
+    border-top: 1px solid #242424;
 }
 
 
@@ -43,9 +46,9 @@ QMainWindow{
     border-top: 1px solid #161616;
 }
 QTableWidget {
-    background: #222;
+    background: #000000;
     color: #f2f2f2;
-    selection-background-color: rgba(100, 100, 100, 150);
+    selection-background-color: #151515;
     selection-color: #ffffff;
     border: 0;
     outline: 0;
@@ -54,13 +57,35 @@ QTableWidget::item {
     padding: 3px 6px;
     border: 0;
 }
+QTableWidget::item:hover {
+    padding: 3px 6px;
+    border: 0;
+}
+
 QPushButton, QComboBox {
-    background: #242424;
+    background: transparent;
     color: #d7d7d7;
-    border: 1px solid #242424;
-    padding: 8px 8px;
-    border-radius: 16px;
-    qproperty-iconSize: 16px 16px; 
+    border: none;
+    padding: 5px 0px;
+    min-height: 22px;
+    qproperty-iconSize: 30px 30px; 
+    border-radius: 5px;
+}
+#buttonRow > QPushButton:hover{
+    background: rgba(100,100,100,0.5);
+}
+
+
+#playlistMenu > QPushButton {
+    qproperty-iconSize: 30px 30px; 
+    margin: 5px;
+    padding: 3px 2px;
+
+}
+
+QPushButton#save_button{
+    qproperty-iconSize: 26px 26px; 
+    padding: 5px 2px;
 }
 
 QListView {
@@ -75,38 +100,53 @@ QListView::item {
     padding: 8px 10px;
     border: none;
 }
-        QComboBox::drop-down {
-border: none;
-        }
-        QComboBox QAbstractItemView {
-outline: none;
-        }
+QComboBox::drop-down {
+    border: none;
+}
+
+QComboBox QAbstractItemView {
+    outline: none;
+}
 
 QPushButton:hover, QComboBox:hover {
     background: #191919;
     border-color: #3a3a3a;
 }
 QLineEdit {
-    background: #242424;
+    background: #333;
     color: #eeeeee;
     border: 1px solid #242424;
     padding: 5px 8px;
-    border-radius: 8px;
+    margin: 5px;
 }
 QSlider::groove:horizontal {
-    background: #cfcfcf;
-    height: 3px;
+    background: #555;
+    height: 4px;    
+    border-radius: 2px;
 }
+
 QSlider::handle:horizontal {
-    background: #6b6b6b;
-    width: 10px;
-    margin: -5px 0;
+    background: transparent;     
+    border: 1px solid transparent; 
+    width: 10px;             
+    height: 12px;           
+    border-radius: 6px;   
+    margin: -4px 0;         
+}
+QSlider::handle:horizontal:hover {
+    background: #FFF;
+    border: 1px solid #FFF;
+}
+
+QSlider::handle:horizontal:pressed {
+    background: #FFF;
+    border: 1px solid #FFF;
 }
 QSlider::sub-page:horizontal {
-    background: #6b6b6b;
+    background: #bdbdbd;
 }
 #waveformSeekBar {
-    background: #010;
+    background: #0b0b0b;
     border: 1px solid #222222;
     border-radius: 10px;
 }
@@ -116,20 +156,20 @@ VisualizerWindow{
         qproperty-barColorMid: #6d6d6d;
         qproperty-barColorHigh: #6d6d6d;
         qproperty-barColorPeak: #6d6d6d;
+        margin: 20px;
 }
-
 
 PlaylistWidget{
     qproperty-treakColorCurrent: #fff;
-    qproperty-treakBgColorCurrent: #222;
+    qproperty-treakBgColorCurrent: #000;
 
     qproperty-treakColor:#bbb;
 
-    qproperty-treakColorNotLoaded: #a2a2a2;
-    qproperty-treakBgColorNotLoaded: #2b2b2b;
+    qproperty-treakColorNotLoaded: #a5a5a5;
+    qproperty-treakBgColorNotLoaded: #111;
 
-    qproperty-treakColorUnavailable: #444444;
-    qproperty-treakBgColorUnavailable: #1b1b1b;
+    qproperty-treakColorUnavailable: #333333;
+    qproperty-treakBgColorUnavailable: #000;
 }
 
 
@@ -148,4 +188,8 @@ QWidget#MainMenuBar QPushButton {
 }
 QWidget#MainMenuBar QPushButton:hover {
     background-color: rgba(255, 255, 255, 40);
+}
+
+QWidget#MainMenuBar QPushButton::menu-indicator {
+    image: none; 
 }

@@ -14,7 +14,11 @@
 -->
 
 <!-- Корневой контейнер: VBox без отступов, нулевой spacing -->
-<qwidget flex="v" margin="0" spacing="0">
+<qwidget flex="v" margin="0" spacing="0"
+         meta-name="Foxyglass - System"
+         meta-author="Maxsspeaker"
+         meta-version="6.0.2"
+         meta-description="Системный вариант MSMP FoxWave использущий системную тему (рекомендуется использовать на Linux)\nДля лучшего опыта установите системную тему (например через Kvantum) ">
 
     <!-- ═══════════════════════════════════════════════════════════════
          NowDisplay: обложка / мета / визуализатор / waveform-seekbar
@@ -83,12 +87,12 @@
             <!-- левый распор -->
             <qwidget stretch="1" />
 
-            <qpushbutton id="prev_button"    connect="play_previous" />
-            <qpushbutton id="stop_button"    connect="stop_playback" />
-            <qpushbutton id="play_button"    connect="play_selected_or_current" />
-            <qpushbutton id="pause_button"   connect="pause_playback" />
-            <qpushbutton id="next_button"    connect="play_next" />
-            <qpushbutton id="restart_button" connect="restart_current_stream" />
+            <qpushbutton id="prev_button"    icon="resources/previous.svg"     connect="play_previous" />
+            <qpushbutton id="stop_button"    icon="resources/stop.svg"         connect="stop_playback" />
+            <qpushbutton id="play_button"    icon="resources/play.svg"         connect="play_selected_or_current" />
+            <qpushbutton id="pause_button"   icon="resources/pause.svg"        connect="pause_playback" />
+            <qpushbutton id="next_button"    icon="resources/next.svg"         connect="play_next" />
+            <qpushbutton id="restart_button" icon="resources/reload-audio.svg" connect="restart_current_stream" />
 
             <!-- правый распор — в 3 раза шире левого, прижимает кнопки к центру -->
             <qwidget stretch="3" />
@@ -115,7 +119,7 @@
     <qwidget id="playlistBox" flex="v"
              margin="0" spacing="0">
 
-        <qtablewidget id="table" stretch="1" />
+        <playlistwidget id="playlist_table" stretch="1" />
 
         <!-- Строка управления: Add / URL / cookies / Clear / Save / Load
              spacing="6" соответствует оригинальному playlist_menu.setSpacing(6) -->
@@ -127,9 +131,6 @@
             <qlineedit id="url_input"
                        placeholder="URL for yt-dlp"
                        stretch="1" />
-
-            <fixedComboBox id="cookie_browser"
-                           items="No cookies,Firefox cookies,Chrome cookies,Chromium cookies,Brave cookies,Edge cookies" />
 
             <qpushbutton id="clear_button" text="Clear" connect="clear_playlist" />
             <qpushbutton id="save_button"  text="Save"  connect="save_playlist" />

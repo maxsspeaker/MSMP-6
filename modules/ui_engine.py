@@ -29,6 +29,7 @@ ui_engine.py — XML-driven UI engine for PySide6
 
 Поддерживаемые атрибуты:
     id              → setObjectName + engine.widgets["id"]
+    widget_class    → setObjectName
     style           → setStyleSheet
     flex            → тип layout: "h"|"hbox"|"v"|"vbox"|"grid"|"form"
     connect         → имя слота контекста
@@ -61,9 +62,11 @@ ui_engine.py — XML-driven UI engine for PySide6
 
 from __future__ import annotations
 
+import os,re,sys
 from xml.etree import ElementTree as ET
 from typing import Any, Callable
 import inspect
+import math
 
 from PySide6.QtWidgets import (
     QApplication, QWidget, QMainWindow, QDialog,
@@ -75,9 +78,25 @@ from PySide6.QtWidgets import (
     QDateTimeEdit, QDateEdit, QTimeEdit, QFontComboBox, QDial,
     QToolButton, QCommandLinkButton, QKeySequenceEdit,
     QHBoxLayout, QVBoxLayout, QGridLayout, QFormLayout,
-    QLayout, QSizePolicy,
+    QLayout, QSizePolicy,QStyle,QHeaderView,
+    QScroller, 
+    QScrollerProperties,
+    QAbstractItemView,
+    QToolTip
 )
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import Qt, QSize,QTimer,Signal,QEasingCurve
+from PySide6.QtGui import QIcon,QBrush, QColor, QLinearGradient, QPainter, QPixmap,QAction
+
+from modules.AboutWindow import AboutWindow
+
+WAVEFORM_BIN_COUNT = 440
+WAVEFORM_BACKGROUND_COLOR = "#00000000"
+WAVEFORM_TRACK_COLOR = "#232323"
+WAVEFORM_BUFFER_COLOR = "#7c7c7c"
+WAVEFORM_PLAYED_COLOR = "#e8e8e8"
+WAVEFORM_HANDLE_COLOR = "#f2f2f2"
+WAVEFORM_HEIGHT = 44
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -269,8 +288,10 @@ class UIEngine:
         return element
 
     def build_file(self, path: str) -> QWidget:
-        """Читает XML из файла и вызывает build()."""
-        with open(path, encoding="utf-8") as fh:
+        """Читает index.xml из папки и вызывает build()."""
+        self._skin_path=path
+
+        with open(os.path.join(path, "index.xml"), encoding="utf-8") as fh:
             return self.build(fh.read())
 
     # ── Построение элемента ───────────────────────────────────────────────────
@@ -321,6 +342,10 @@ class UIEngine:
             widget.setObjectName(widget_id)
             self.widgets[widget_id] = widget
 
+        widget_class = attrs.get("class", "").strip()
+        if widget_class:
+            widget.setObjectName(widget_class)
+
         if is_named_container:
             self.widgets.setdefault(tag, widget)
 
@@ -341,6 +366,8 @@ class UIEngine:
             widget.setEnabled(_bool(attrs["enabled"]))
         if "visible" in attrs:
             widget.setVisible(_bool(attrs["visible"]))
+        if "icon" in attrs:
+            self._apply_icon(widget, attrs["icon"],self._skin_path)
 
         # 6. Размеры ───────────────────────────────────────────────────────────
         if "min-width" in attrs or "min-height" in attrs:
@@ -435,6 +462,13 @@ class UIEngine:
             widget.setTitle(text)
 
     @staticmethod
+    def _apply_icon(widget: QWidget, icon: str, _skin_path: str) -> None:
+        if not icon:
+            return
+        if hasattr(widget, "setIcon"):
+            widget.setIcon(QIcon(icon.replace("{internal}", _skin_path, 1) if icon.startswith("{internal}") else icon))
+
+    @staticmethod
     def _apply_specifics(widget: QWidget, attrs: dict, text: str) -> None:
         if "placeholder" in attrs and hasattr(widget, "setPlaceholderText"):
             widget.setPlaceholderText(attrs["placeholder"])
@@ -489,3 +523,484 @@ class UIEngine:
             f"[UIEngine] Предупреждение: не найден подходящий сигнал "
             f"для '{widget.__class__.__name__}'."
         )
+
+
+
+class qJumpSlider(QSlider):
+    def __init__(self, orientation=Qt.Orientation.Horizontal, parent=None):
+        super().__init__(orientation, parent)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            # Вычисляем новое значение напрямую по координате клика
+            if self.orientation() == Qt.Orientation.Horizontal:
+                new_value = QStyle.sliderValueFromPosition(
+                    self.minimum(), self.maximum(), 
+                    event.position().toPoint().x(), self.width()
+                )
+            else:
+                new_value = QStyle.sliderValueFromPosition(
+                    self.minimum(), self.maximum(), 
+                    event.position().toPoint().y(), self.height()
+                )
+            
+            # Устанавливаем значение
+            self.sliderPressed.emit()
+            self.setValue(new_value)
+
+            QTimer.singleShot(
+                100,
+                lambda:self.sliderReleased.emit(),
+            )
+            
+            # ВАЖНО: передаем событие дальше базовому классу!
+            # Это позволит Qt "подхватить" ползунок для плавного drag-and-drop
+            super().mousePressEvent(event)
+        else:
+            super().mousePressEvent(event)
+
+UIEngine.register("qjumpslider", qJumpSlider)
+
+
+
+class WaveformSeekBar(QWidget):
+    sliderPressed = Signal()
+    sliderMoved = Signal(int)
+    sliderReleased = Signal()
+    valueChanged = Signal(int)
+
+    def __init__(self,parent=None) -> None:
+        super().__init__()
+        self._minimum = 0
+        self._maximum = 1
+        self._value = 0
+        self._waveform: list[float] = []
+        self._buffered_ratio = 0.0
+        self._dragging = False
+        self.setMouseTracking(True)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFixedHeight(WAVEFORM_HEIGHT)
+        self.setObjectName("waveformSeekBar")
+        self.parent=parent
+
+
+    def setRange(self, minimum: int, maximum: int) -> None:
+        self._minimum = int(minimum)
+        self._maximum = max(self._minimum, int(maximum))
+        self.setValue(self._value)
+
+    def setValue(self, value: int) -> None:
+        value = self._clamp(value)
+        if value != self._value:
+            self._value = value
+            self.valueChanged.emit(self._value)
+        self.update()
+
+    def value(self) -> int:
+        return self._value
+
+    def set_waveform(self, waveform: list[float]) -> None:
+        self._waveform = [min(1.0, max(0.0, float(level))) for level in waveform]
+        self.update()
+
+    def set_buffered_ratio(self, ratio: float) -> None:
+        self._buffered_ratio = max(0.0, min(1.0, float(ratio)))
+        self.update()
+
+    def _clamp(self, value: int) -> int:
+        return max(self._minimum, min(self._maximum, int(value)))
+
+    def _value_from_x(self, x: float) -> int:
+        if self._maximum <= self._minimum:
+            return self._minimum
+
+        usable = max(1.0, float(self.width() - 24))
+        left = 12.0
+        ratio = (float(x) - left) / usable
+        ratio = max(0.0, min(1.0, ratio))
+        return int(round(self._minimum + ratio * (self._maximum - self._minimum)))
+
+    def _x_from_value(self, value: int) -> float:
+        if self._maximum <= self._minimum:
+            return 12.0
+        usable = max(1.0, float(self.width() - 24))
+        ratio = (self._clamp(value) - self._minimum) / float(self._maximum - self._minimum)
+        return 12.0 + ratio * usable
+
+    def _format_ms(self, ms: int) -> str:
+        seconds = max(0, ms // 1000)
+        minutes, seconds = divmod(seconds, 60)
+        hours, minutes = divmod(minutes, 60)
+        if hours:
+            return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+        return f"{minutes}:{seconds:02d}"
+
+    def _show_seek_tooltip(self, value: int, global_pos) -> None:
+        QToolTip.showText(global_pos, self._format_ms(value), self)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            self._dragging = True
+            self.sliderPressed.emit()
+            value = self._value_from_x(event.position().x())
+            self.setValue(value)
+            self.sliderMoved.emit(value)
+            self._show_seek_tooltip(value, event.globalPosition().toPoint())
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._dragging:
+            value = self._value_from_x(event.position().x())
+            self.setValue(value)
+            self.sliderMoved.emit(value)
+            self._show_seek_tooltip(value, event.globalPosition().toPoint())
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if self._dragging and event.button() == Qt.LeftButton:
+            value = self._value_from_x(event.position().x())
+            self.setValue(value)
+            self.sliderMoved.emit(value)
+            self._dragging = False
+            self.sliderReleased.emit()
+            QToolTip.hideText()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.fillRect(self.rect(), QColor(WAVEFORM_BACKGROUND_COLOR))
+
+        outer = self.rect().adjusted(2, 6, -2, -6)
+        if outer.width() <= 0 or outer.height() <= 0:
+            return
+
+        painter.setPen(Qt.NoPen)
+        #painter.setBrush(QColor("#141414"))
+        #painter.drawRoundedRect(outer, 0, 0)
+
+        inner = outer.adjusted(10, 3, -10, -3)
+        if inner.width() <= 0 or inner.height() <= 0:
+            return
+
+        center_y = inner.center().y()
+        half_height = max(1.0, inner.height() / 2.0)
+        waveform = self._waveform
+
+        if waveform:
+            bin_count = len(waveform)
+            if bin_count <= 0:
+                waveform = []
+            else:
+                bin_width = max(1.0, inner.width() / float(bin_count))
+                played_index = 0
+                if self._maximum > self._minimum:
+                    ratio = (self._value - self._minimum) / float(self._maximum - self._minimum)
+                    played_index = int(ratio * bin_count)
+                    if played_index >= bin_count:
+                        played_index = bin_count - 1
+                buffered_index = int(max(0, bin_count - 1) * self._buffered_ratio)
+
+                for i, level in enumerate(waveform):
+                    x = inner.left() + i * bin_width
+                    bar_h = max(1.0, level * half_height)
+                    if i <= played_index:
+                        color = QColor(WAVEFORM_PLAYED_COLOR)
+                    elif i <= buffered_index:
+                        color = QColor(WAVEFORM_BUFFER_COLOR)
+                    else:
+                        color = QColor(WAVEFORM_TRACK_COLOR)
+                    painter.setBrush(color)
+                    painter.drawRect(int(x), int(center_y - bar_h), max(1, int(math.ceil(bin_width))), int(bar_h * 2))
+        else:
+            painter.setBrush(QColor(WAVEFORM_TRACK_COLOR))
+            painter.drawRect(inner)
+
+            buffered_width = int(round(inner.width() * self._buffered_ratio))
+            if buffered_width > 0:
+                buffered_rect = inner.__class__(inner.left(), inner.top(), buffered_width, inner.height())
+                painter.setBrush(QColor(WAVEFORM_BUFFER_COLOR))
+                painter.drawRect(buffered_rect)
+
+        if self._maximum > self._minimum:
+            handle_x = self._x_from_value(self._value)
+            painter.setBrush(QColor(WAVEFORM_HANDLE_COLOR))
+            painter.drawRect(int(handle_x) - 1, inner.top() - 3, 2, inner.height() + 6)
+
+UIEngine.register("waveformSeekBar",  WaveformSeekBar)
+
+class SkinManager(QMainWindow):
+
+    def _init_ui(self): 
+        _ui_xml_path = os.path.join(os.path.dirname(sys.modules['__main__'].__file__), f"skins/{self.config["skin"]}")
+
+        self._engine = UIEngine(context=self, default_spacing=0, default_margin=0)
+        container = self._engine.build_file(_ui_xml_path)
+
+
+        # Удобный алиас: self.ui["widget_id"]
+        self.ui = self._engine.widgets
+
+        # ── Ссылки на виджеты (совместимость с остальным кодом) ───────────
+        #self.NowDisplay          = self.ui["NowDisplay"]
+        self.position_slider     = self.ui["position_slider"]
+        self.volume_slider       = self.ui["volume_slider"]
+        self.status_label        = self.ui["status_label"]
+        self.url_input           = self.ui["url_input"]
+        #self.add_button          = self.ui["add_button"]
+        #self.clear_button        = self.ui["clear_button"]
+        #self.save_button         = self.ui["save_button"]
+        #self.load_button         = self.ui["load_button"]
+        #self.play_button         = self.ui["play_button"]
+        #self.pause_button        = self.ui["pause_button"]
+        #self.stop_button         = self.ui["stop_button"]
+        #self.prev_button         = self.ui["prev_button"]
+        #self.next_button         = self.ui["next_button"]
+        #self.restart_button      = self.ui["restart_button"]
+        self.mode_button         = self.ui["mode_button"]
+        self.playlistBox         = self.ui["playlistBox"]
+        self.MainMenuBar         = self.ui["MainMenuBar"]
+
+        if not(self.ui.get("playlist_table")): 
+            self.table = self.ui["table"] #!!! legacy БУДЕТ УБРАНО В 6.1.1 исправьте кастомные скины!!!
+        else:
+            self.table = self.ui["playlist_table"]
+
+        self._setup_MainMenuBar()
+
+
+        self.visualizer_window = self.ui.get("visualizer_window")
+
+        if(self.visualizer_window):
+            self.visualizer_window.raise_()
+            self.visualizer_window.activateWindow()
+
+            self.audio_buffer_output.audioBufferReceived.connect(self.on_audio_buffer_received) # если вы делаете подключение в _init_ui прочитайте _reload_skin !!
+
+            self.visualizer_window.show()
+
+        cover_background = self.ui.get("cover_background")
+
+        if (cover_background):
+            cover_background.gradient = [(0.95, QColor(0, 0, 0, 0)), (0.6, QColor(0, 0, 0, 128))]
+            cover_background.setAlignment(Qt.AlignCenter)
+            cover_background.setScaledContents(True)
+            cover_background.lower()
+
+            QTimer.singleShot(
+                10,
+                lambda: cover_background.setGeometry(cover_background.parentWidget().rect()),
+            )
+            
+
+        self.set_metaData(
+            time_possition="0:00",
+            time_end="0:00",
+            track_title="",
+            artist="",
+            album=""
+            )
+        self.set_cover_placeholder()
+
+
+        self.mode_button.setIcon(QIcon(self.PLAY_MODES_icons[self.play_mode_index]))
+
+        # ── Дополнительный connect для url_input (returnPressed) ──────────
+        self.url_input.returnPressed.connect(self.add_url)
+
+        # ── Донастройка volume_slider ─────────────────────────────────────
+        self.volume_slider.valueChanged.connect(
+            lambda value: self.audio_output.setVolume(value / 100)
+        )
+
+        # ── Донастройка seek bar ──────────────────────────────────────────
+
+        if isinstance(self.position_slider, WaveformSeekBar):
+            self.position_slider.set_buffered_ratio(0.0)
+        self.position_slider.setRange(0, 0)
+
+        self.position_slider.sliderPressed.connect(self.on_seek_start)
+        self.position_slider.sliderReleased.connect(self.on_seek_end)
+        self.position_slider.sliderMoved.connect(self.on_seek_preview)
+
+        # ── Донастройка таблицы ───────────────────────────────────────────
+        self.table.playlist = self.playlist
+        self.table.setColumnCount(2)
+        self.table.setHorizontalHeaderLabels(["Track", "Length"])
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().hide()
+        self.table.verticalHeader().hide()
+        self.table.setShowGrid(False)
+        self.table.setAlternatingRowColors(False)
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.table.cellDoubleClicked.connect(lambda row, _col: self.play_index(row))
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self.show_playlist_menu)
+        self.table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self.table.verticalScrollBar().setSingleStep(1)
+        self.table.viewport().installEventFilter(self)
+        QScroller.grabGesture(self.table.viewport(), QScroller.LeftMouseButtonGesture)
+
+        scroller = QScroller.scroller(self.table.viewport())
+        props = QScrollerProperties()
+        props.setScrollMetric(QScrollerProperties.DragStartDistance, 0.004)
+        props.setScrollMetric(QScrollerProperties.DragVelocitySmoothingFactor, 0.6) # Сделали чуть отзывчивее
+        props.setScrollMetric(QScrollerProperties.ScrollingCurve, QEasingCurve(QEasingCurve.OutCubic))
+        scroller.setScrollerProperties(props)
+
+        # ── Политика размера playlistBox ──────────────────────────────────
+        self.playlistBox.setMinimumHeight(0)
+        sp = self.playlistBox.sizePolicy()
+        sp.setVerticalPolicy(QSizePolicy.Policy.Ignored)
+        self.playlistBox.setSizePolicy(sp)
+
+
+        self.setCentralWidget(container)
+
+        self.apply_style()
+
+        try:
+            self.player.bufferProgressChanged.connect(self.on_buffer_progress_changed)
+        except AttributeError:
+            pass
+
+    def _setup_MainMenuBar(self):
+        file_menu = self.MainMenuBar.add_menu("Menu")
+        file_menu.addAction("About",lambda:AboutWindow(self).exec())
+
+        setup_menu=self.MainMenuBar.add_menu("Options")
+        skin_menu=self.MainMenuBar.add_submenu(setup_menu, "Skins", hide_if_empty=False)
+        self.cookie_menu=self.MainMenuBar.add_submenu(setup_menu, "Cookies mode ", hide_if_empty=False)
+
+        setup_menu.addAction("Plugin manager", lambda:self._plugin_manager.show()) 
+
+        for skin in sorted(os.listdir(os.path.join(os.path.dirname(sys.modules['__main__'].__file__), "skins"))):
+           skin_menu.addAction(skin, lambda s=skin: self.set_skin(s)) 
+
+        # ── Донастройка cookie_browser (userData для элементов) ───────────
+        for i, data in enumerate(self.cookie_data):
+            if(i==0):
+                continue
+                
+            action = QAction(data, self)
+            action.setCheckable(True)
+            action.setChecked(data==self.config["cookies"]["browser"])
+            action.toggled.connect(lambda checked,s=data,index=i: self.change_cookie_mode(checked,s,index))
+            self.cookie_menu.addAction(action)
+
+        if not hasattr(self, "PluginMenu"):
+            self.PluginMenu=self.MainMenuBar.add_submenu(setup_menu, "Plugins")
+            self.PluginMenu.setParent(self, self.PluginMenu.windowFlags())
+
+            self.PlguinMenu=self.PluginMenu #!!! legacy БУДЕТ УБРАНО В 6.1.1 исправьте кастомные скины!!!
+        else:
+            setup_menu.addMenu(self.PluginMenu)
+
+
+
+        file_menu.addSeparator()
+        file_menu.addAction("Exit", self.close)
+        file_menu.addSeparator()
+
+    #change_cookie_browser
+        
+
+    def change_cookie_mode(self,checked,mode,index):
+        for action in self.cookie_menu.actions():
+            if action.isSeparator():
+                continue
+            if(mode==action.text()):
+                continue
+            action.blockSignals(True)
+            action.setChecked(False)
+            action.blockSignals(False)
+
+        print(checked)
+        if(checked):
+            self.config["cookies"]={"browser":mode or "","selected":index}
+        else:
+            self.config["cookies"]={"browser":"" or "","selected":0}
+
+    def set_cover_placeholder(self) -> None:
+        cover_label = self.ui.get("cover_label")
+        cover_background = self.ui.get("cover_background")
+        if (cover_background):
+            cover_background.set_new_image(QPixmap("resources/MSMPwaveBg.png"))
+        if(cover_label):
+            cover_label.set_new_image(QPixmap("resources/MSMPwave.png"))
+
+
+    def set_metaData(self,time_possition=None,time_end=None,track_title=None,artist=None,album=None):
+        if(time_possition and time_end):
+            time_label=self.ui.get("time_label")
+            time_possition_label=self.ui.get("time_possition_label")
+            time_end_label=self.ui.get("time_end_label")
+            if(time_label):
+                if (time_end=="0:00"):
+                    time_label.setText(f"{time_possition}")
+                else:
+                    time_label.setText(f"{time_possition} / {time_end}")
+            if(time_possition_label):
+                time_possition_label.setText(f"{time_possition}")
+            if(time_end_label):
+                time_end_label.setText(f"{time_end}")
+
+
+        if(track_title):
+            track_title_label=self.ui.get("track_title_label")
+            if(track_title_label):
+                track_title_label.setText(track_title)
+        if(artist):
+            artist_label=self.ui.get("artist_label")
+            if(artist_label):
+                artist_label.setText(artist)
+        if(album):
+            album_label=self.ui.get("album_label")
+            if(album_label):
+                album_label.setText(album)
+
+    def apply_style(self) -> None:
+        with open(os.path.join(os.path.dirname(sys.modules['__main__'].__file__), f"skins/{self.config["skin"]}/style.css")) as f:
+            self.setStyleSheet(f.read())
+
+    def set_skin(self,skin):
+        print(skin)
+        self.config["skin"]=skin
+
+        self._reload_skin()
+
+
+    def _reload_skin(self): 
+
+        # Если вы добовляете какое-то действие связанное с интерфейсом и его работой. Делайте отключение здесь!
+
+        current_index=self.table.current_index
+
+        if(self.visualizer_window):
+            self.audio_buffer_output.audioBufferReceived.disconnect(self.on_audio_buffer_received) # пример прямо здесь
+
+        self._init_ui() 
+        self.refresh_table()
+        self.table.current_index=current_index
+        if current_index is not None:
+            self.update_current_metadata(self.playlist[self.table.current_index])
+            self.table.apply_row_style(current_index)
+
+            if isinstance(self.ui.get("position_slider"), WaveformSeekBar):
+                if not self.playlist[self.table.current_index].waveform == []:
+                    self.position_slider.set_waveform(self.playlist[self.table.current_index].waveform)
+                else:
+                    self.request_waveform_generation(self.table.current_index)
+            self.position_slider.setRange(0, max(0, self.player.duration()))
+            self.update_buffer_progress(0.0)
+            
+        self.events.on_skin_changed.emit(self.config["skin"])
+

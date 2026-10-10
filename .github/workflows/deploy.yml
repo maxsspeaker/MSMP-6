@@ -3,6 +3,8 @@ name: Build media player
 on:
   push:
     branches: [dev]
+  #schedule:
+  #  - cron: '0 0 * * *'
   workflow_dispatch:
 
 permissions:
@@ -15,6 +17,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: dev 
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -45,19 +49,35 @@ jobs:
           set -euo pipefail
 
           dist_root="$(find dist -maxdepth 1 -type d -name '*.dist' | head -n 1)"
+          build_root="$(find dist -maxdepth 1 -type d -name '*.build' | head -n 1)"
+
+
           if [ -z "$dist_root" ]; then
             echo "dist folder not found"
             exit 1
           fi
 
+          rm -rf $build_root
+
           cp -r resources "$dist_root/resources"
           cp -r skins "$dist_root/skins"
+
+          #mv "$dist_root" "$(dirname "$dist_root")/msmp-foxwave-Linux-amd64"
+
+      - name: Archive Linux build
+        shell: bash
+        run: |
+          cd dist
+          
+          dist_dir=$(find . -maxdepth 1 -type d -name '*.dist' | head -n 1)
+          tar -czvf linux-build.tar.gz "$dist_dir"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: linux-build
-          path: dist
+          path: dist/linux-build.tar.gz # Загружаем только архив
+
 
   build-windows:
     runs-on: windows-latest
@@ -65,6 +85,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: dev 
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -128,13 +150,51 @@ jobs:
         shell: pwsh
         run: |
           $distRoot = Get-ChildItem dist -Directory | Where-Object { $_.Name -like "*.dist" } | Select-Object -First 1
+          $buildRoot = Get-ChildItem dist -Directory | Where-Object { $_.Name -like "*.build" } | Select-Object -First 1
           if (-not $distRoot) { throw "dist folder not found" }
+
+          Remove-Item -Path "$($buildRoot.FullName)" -Recurse -Force
 
           Copy-Item -Recurse -Force resources "$($distRoot.FullName)\resources"
           Copy-Item -Recurse -Force skins "$($distRoot.FullName)\skins"
+
+          # Rename-Item -Path $distRoot.FullName -NewName "msmp-foxwave-win-x64"
+
+      - name: Archive Windows build
+        shell: pwsh
+        run: |
+          $distRoot = Get-ChildItem dist -Directory | Where-Object { $_.Name -like "*.dist" } | Select-Object -First 1
+          if (-not $distRoot) { throw "dist folder not found" }
+          
+          Compress-Archive -Path "$($distRoot.FullName)" -DestinationPath "dist\windows-build.zip" -Force
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows-build
-          path: dist
+          path: dist\windows-build.zip # Загружаем только архив
+
+  publish-nightly:
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Create Release Directory
+        run: mkdir -p release-assets
+
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets/
+          merge-multiple: true 
+
+      - name: Update Nightly Release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: "nightly"
+          name: "MSMP FoxWave Night"
+          prerelease: true
+          allowUpdates: true 
+          removeArtifacts: true 
+          artifacts: "release-assets/*"

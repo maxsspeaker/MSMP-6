@@ -56,11 +56,11 @@ class MprisRootInterface(ServiceInterface):
 
     @dbus_property(access=PropertyAccess.READ)
     def Identity(self) -> "s":
-        return "MSMP5"
+        return "MSMP FoxWave"
 
     @dbus_property(access=PropertyAccess.READ)
     def DesktopEntry(self) -> "s":
-        return "msmp5"
+        return "msmp6"
 
     @dbus_property(access=PropertyAccess.READ)
     def SupportedUriSchemes(self) -> "as":

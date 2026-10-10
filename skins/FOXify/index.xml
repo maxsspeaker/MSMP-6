@@ -14,11 +14,93 @@
 -->
 
 <!-- Корневой контейнер: VBox без отступов, нулевой spacing -->
-<qwidget flex="h" margin="0" spacing="0"
-         meta-name="Foxyglass - SteamDeck"
+<qwidget flex="v" margin="0" spacing="0"
+         meta-name="Foxyglass"
          meta-author="Maxsspeaker"
          meta-version="6.0.2"
-         meta-description="SteamDeck вариант MSMP FoxWave">
+         meta-description="Классический тёмный MSMP FoxWave скин">
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         NowDisplay: обложка / мета / визуализатор / waveform-seekbar
+         ═══════════════════════════════════════════════════════════════ -->
+
+    <qwidget id="NowDisplay" fixed-height="225"
+             flex="v" margin="0" spacing="0">
+
+        <!-- Фоновое изображение — позиционируется вручную через resizeEvent -->
+        <gradientImageLabel id="cover_background"
+                            fixed-height="210" Align="AlignCenter"
+                            visible="true" blur_effect="16" nolayout="true"/>
+
+        <systemmenubar id="MainMenuBar" visible="true"/>
+
+        <!-- Строка: обложка + мета + визуализатор
+             margin="16,16,16,0" → left=16 top=16 right=16 bottom=0  -->
+        <qwidget id="playNowRow" flex="h"
+                 margin="16,10,16,0" spacing="0"
+                 stretch="1">
+
+            <gradientImageLabel id="cover_label" class="cover" Align="AlignCenter"
+                                fixed-width="110" fixed-height="110" blur_effect="0"/>
+
+            <!-- Мета-блок: заголовок + исполнитель + альбом, прижаты к центру -->
+            <qwidget id="metaBlock" flex="v"
+                     margin="0" spacing="0"
+                     stretch="1">
+                <!-- верхний распор -->
+                <qwidget stretch="1" />
+                <qlabel id="track_title_label" class="metaText"
+                        style="color:#f5f5f5; font-size:19px; font-weight:700;
+                               margin:2px; margin-left:10px;" />
+                <qlabel id="artist_label" class="metaText"
+                        style="color:#a8a8a8; font-size:14px;
+                               margin:2px; margin-left:10px;" />
+                <qlabel id="album_label" class="metaText"
+                        style="color:#a8a8a8; font-size:14px;
+                               margin:2px; margin-left:10px;" />
+                <!-- нижний распор -->
+                <qwidget stretch="1" />
+            </qwidget>
+
+        </qwidget>
+
+                <!-- Строка кнопок управления -->
+        <qwidget id="buttonRow" flex="h"
+                 margin="16,10,16,0" spacing="8">
+
+            <!-- левый распор -->
+            <qwidget stretch="4" />
+
+            <qpushbutton id="prev_button"    icon="resources/previous.svg"     connect="play_previous" />
+            <qpushbutton id="stop_button"    icon="resources/stop.svg"         connect="stop_playback" />
+            <qpushbutton id="play_button"    icon="resources/play.svg"         connect="play_selected_or_current" />
+            <qpushbutton id="pause_button"   icon="resources/pause.svg"        connect="pause_playback" />
+            <qpushbutton id="next_button"    icon="resources/next.svg"         connect="play_next" />
+
+            <!-- правый распор — в 3 раза шире левого, прижимает кнопки к центру -->
+            <qwidget stretch="3" />
+
+            <qpushbutton id="restart_button" icon="resources/reload-audio.svg" connect="restart_current_stream" />
+
+            <qpushbutton id="mode_button" connect="toggle_play_mode" />
+
+            <qslider id="volume_slider"
+                     orientation="h"
+                     min="0" max="100" value="80"
+                     fixed-width="120"
+                     connect="on_volume_slider_changed" />
+
+        </qwidget>
+
+        <qwidget flex="h" margin="26,10,26,10" spacing="10" stretch="1">
+            <qlabel id="time_possition_label" class="durationText" text="0:00 / 0:00" style="color:#ffffff;" />
+            <qjumpslider orientation="h"  id="position_slider" />
+            <qlabel id="time_end_label" class="durationText" text="0:00 / 0:00" style="color:#ffffff;" />
+        </qwidget>
+
+
+    </qwidget>
+
     <!-- ═══════════════════════════════════════════════════════════════
          playlistBox: таблица + строка управления плейлистом
          margin="0" — без внешних отступов, как в оригинале
@@ -31,125 +113,24 @@
         <!-- Строка управления: Add / URL / cookies / Clear / Save / Load
              spacing="6" соответствует оригинальному playlist_menu.setSpacing(6) -->
         <qwidget id="playlistMenu" flex="h"
-                 margin="0" spacing="6">
+                 margin="0" spacing="0">
 
-            <qpushbutton id="add_button" text="Add" connect="add_url" />
+            <qpushbutton id="add_button" icon="{internal}/resources/add.svg"   connect="add_url" />
 
             <qlineedit id="url_input"
                        placeholder="URL for yt-dlp"
                        stretch="1" />
 
-            <qpushbutton id="clear_button" text="Clear" connect="clear_playlist" />
-            <qpushbutton id="save_button"  text="Save"  connect="save_playlist" />
-            <qpushbutton id="load_button"  text="Load"  connect="load_playlist" />
+            <qpushbutton id="clear_button" icon="{internal}/resources/clear.svg"  connect="clear_playlist" />
+            <qpushbutton id="save_button"  icon="{internal}/resources/save.svg" connect="save_playlist" />
+            <qpushbutton id="load_button" icon="{internal}/resources/load.svg"  connect="load_playlist" />
 
         </qwidget>
 
     </qwidget>
 
-    <!-- ═══════════════════════════════════════════════════════════════
-         NowDisplay: обложка / мета / визуализатор / waveform-seekbar
-         ═══════════════════════════════════════════════════════════════ -->
-    <qwidget Align="AlignCenter" id="NowDisplay"
-             flex="v" margin="0" spacing="0">
-
-        <!-- Фоновое изображение — позиционируется вручную через resizeEvent -->
-        <gradientImageLabel id="cover_background"
-                            visible="true" blur_effect="16" nolayout="true"/>
-
-        <systemmenubar id="MainMenuBar" visible="true"/>
-
-        <!-- Строка: обложка + мета + визуализатор
-             margin="16,16,16,0" → left=16 top=16 right=16 bottom=0  -->
-
-        <qwidget stretch="1" />
-        <qwidget id="playNowRow" flex="h"
-                 margin="0,16,0,0" spacing="0"
-                 stretch="1">
-
-            <gradientImageLabel id="cover_label"
-                                fixed-width="256" fixed-height="256" blur_effect="0"/>
-
-
-            <!-- Мета-блок: заголовок + исполнитель + альбом, прижаты к центру -->
-
-            <!-- Визуализатор -->
-
-        </qwidget>
-
-        <qwidget Align="AlignHCenter" id="metaBlock" flex="v"
-                    margin="0,16,0,16" spacing="0"
-                    stretch="1">
-                <!-- верхний распор -->
-                <qwidget stretch="1" />
-                <qlabel id="track_title_label"
-                        style="color:#f5f5f5; font-size:19px; font-weight:700;
-                               margin:2px; margin-left:10px;" />
-                <qlabel id="artist_label"
-                        style="color:#a8a8a8; font-size:14px;
-                               margin:2px; margin-left:10px;" />
-                <qlabel id="album_label"
-                        style="color:#a8a8a8; font-size:14px;
-                               margin:2px; margin-left:10px;" />
-                <!-- нижний распор -->
-                <qwidget stretch="1" />
-        </qwidget>
-
-        <!-- Waveform seek bar — без отступов, прилегает вплотную к строке выше -->
-        <qwidget margin="56,16,56,0" Align="AlignVCenter" flex="h">
-            <waveformSeekBar id="position_slider" />       
-
-        </qwidget> 
-
-        <visualizerWindow margin="8,8,8,0" id="visualizer_window" audio_bar_count="258" fixed-height="128" />
-
-
-
-        <qframe id="nowPlaying" flex="v"
-            margin="8,0,8,8" spacing="4">
-
-        <!-- Строка кнопок управления -->
-        <qwidget stretch="1" />
-
-        <qwidget id="buttonRow" flex="h"
-                 margin="0" spacing="8">
-
-            <!-- левый распор -->
-            <qwidget stretch="1" />
-
-            
-            <qpushbutton id="prev_button"    icon="resources/previous.svg"     connect="play_previous" />
-            <qpushbutton id="stop_button"    icon="resources/stop.svg"         connect="stop_playback" />
-            <qpushbutton id="play_button"    icon="resources/play.svg"         connect="play_selected_or_current" />
-            <qpushbutton id="pause_button"   icon="resources/pause.svg"        connect="pause_playback" />
-            <qpushbutton id="next_button"    icon="resources/next.svg"         connect="play_next" />
-            <qpushbutton id="restart_button" icon="resources/reload-audio.svg" connect="restart_current_stream" />
-
-            <!-- правый распор — в 3 раза шире левого, прижимает кнопки к центру -->
-            <qwidget stretch="3" />
-
-            <qlabel id="time_label" text="0:00 / 0:00"
-                    style="color:#ffffff;" />
-
-            <qpushbutton id="mode_button" connect="toggle_play_mode" />
-
-            <qslider id="volume_slider"
-                     orientation="h"
-                     min="0" max="100" value="80"
-                     fixed-width="120"
-                     connect="on_volume_slider_changed" />
-
-        </qwidget>
-
-        <qlabel id="status_label" text="Ready"
+    <!-- Статусная строка -->
+    <qlabel id="status_label" class="statusText" text="Ready"
             style="color:#8f8f8f; padding:5px 10px; border-top:1px solid #161616;" />
 
-    </qframe>
-
-    </qwidget>
-
-    <!-- ═══════════════════════════════════════════════════════════════
-         nowPlaying: транспорт + время + громкость
-         margin="8,8,8,8" соответствует оригинальному setContentsMargins(8,8,8,8)
-         ═══════════════════════════════════════════════════════════════ -->
 </qwidget>

@@ -53,6 +53,11 @@ QTableWidget::item {
     padding: 3px 6px;
     border: 0;
 }
+QTableWidget::item:hover {
+    padding: 3px 6px;
+    border: 0;
+}
+
 QPushButton, QComboBox {
     background: #0d0d0d;
     color: #d7d7d7;
@@ -114,4 +119,40 @@ VisualizerWindow{
         qproperty-barColorMid: #6d6d6d;
         qproperty-barColorHigh: #6d6d6d;
         qproperty-barColorPeak: #6d6d6d;
+        margin: 20px;
+}
+
+PlaylistWidget{
+    qproperty-treakColorCurrent: #fff;
+    qproperty-treakBgColorCurrent: #000;
+
+    qproperty-treakColor:#bbb;
+
+    qproperty-treakColorNotLoaded: #a5a5a5;
+    qproperty-treakBgColorNotLoaded: #000;
+
+    qproperty-treakColorUnavailable: #333333;
+    qproperty-treakBgColorUnavailable: #000;
+}
+
+
+
+QWidget#MainMenuBar {
+    background-color: rgba(0, 0, 0, 50); 
+}
+QWidget#MainMenuBar QPushButton {
+    background-color: transparent;
+    color: white;
+    font-family: 'Segoe UI', Arial;
+    font-size: 13px;
+    padding: 0px 6px;
+    border: none;
+    border-radius: 0px;
+}
+QWidget#MainMenuBar QPushButton:hover {
+    background-color: rgba(255, 255, 255, 40);
+}
+
+QWidget#MainMenuBar QPushButton::menu-indicator {
+    image: none; 
 }
