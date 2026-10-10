@@ -147,21 +147,6 @@ class PluginLoader:
                 
         return extractors.ResolveTask(index,item.page_url,signals,cookie_browser,proxy=proxy,type=type)
 
-    def findPL_resolver(self,
-                    index: int,
-                    url: str,
-                    cookie_browser: str = "",
-                    JamPlaylist:bool = False,
-                    source_id:str = "youtube"
-                ):
-        for extractor in self.extractor_plugins:
-            if(extractor.source==source_id): 
-                return extractor.ResolveTaskPlaylist(index,url,signals,extractor.session)
-                
-        return extractors.ResolveTask(index,url,signals,cookie_browser)
-
-
-
 
 
 class PluginManagerWidget(QWidget):

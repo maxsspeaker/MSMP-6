@@ -368,6 +368,12 @@ class WaveformTask(QRunnable):
         # Peak keeps transients, RMS keeps the body; together they follow the real track shape better.
         return max(peak, rms * 1.08)
 
+    @staticmethod
+    def build_proxy_args(proxy: dict) -> list[str]:
+        if(proxy=={}):
+            return []
+        return ["-http_proxy",f"http://{proxy["host"]}:{proxy["port"]}"]
+
     def generate_waveform(self) -> list[float]:
         ffmpeg = get_ffmpeg_executable()
 
@@ -393,7 +399,7 @@ class WaveformTask(QRunnable):
             "-nostdin",
             "-reconnect",
             "1",
-       #     "-http_proxy", "http://127.0.0.1:2080",
+            *self.build_proxy_args(self.proxy),
             "-reconnect_streamed",
             "1",
             "-reconnect_delay_max",

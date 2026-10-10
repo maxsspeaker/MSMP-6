@@ -889,9 +889,9 @@ class SkinManager(QMainWindow):
         for i, data in enumerate(self.cookie_data):
             if(i==0):
                 continue
-
+                
             action = QAction(data, self)
-            action.setCheckable(True)  # Делаем пункт с галочкой
+            action.setCheckable(True)
             action.setChecked(data==self.config["cookies"]["browser"])
             action.toggled.connect(lambda checked,s=data,index=i: self.change_cookie_mode(checked,s,index))
             self.cookie_menu.addAction(action)
