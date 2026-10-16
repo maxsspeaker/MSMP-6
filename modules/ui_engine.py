@@ -89,6 +89,8 @@ from PySide6.QtGui import QIcon,QBrush, QColor, QLinearGradient, QPainter, QPixm
 
 from modules.AboutWindow import AboutWindow
 
+
+
 WAVEFORM_BIN_COUNT = 440
 WAVEFORM_BACKGROUND_COLOR = "#00000000"
 WAVEFORM_TRACK_COLOR = "#232323"
@@ -752,7 +754,6 @@ class SkinManager(QMainWindow):
         self.position_slider     = self.ui["position_slider"]
         self.volume_slider       = self.ui["volume_slider"]
         self.status_label        = self.ui["status_label"]
-        self.url_input           = self.ui["url_input"]
         #self.add_button          = self.ui["add_button"]
         #self.clear_button        = self.ui["clear_button"]
         #self.save_button         = self.ui["save_button"]
@@ -764,13 +765,8 @@ class SkinManager(QMainWindow):
         #self.next_button         = self.ui["next_button"]
         #self.restart_button      = self.ui["restart_button"]
         self.mode_button         = self.ui["mode_button"]
-        self.playlistBox         = self.ui["playlistBox"]
         self.MainMenuBar         = self.ui["MainMenuBar"]
 
-        if not(self.ui.get("playlist_table")): 
-            self.table = self.ui["table"] #!!! legacy БУДЕТ УБРАНО В 6.1.1 исправьте кастомные скины!!!
-        else:
-            self.table = self.ui["playlist_table"]
 
         self._setup_MainMenuBar()
 
@@ -812,7 +808,8 @@ class SkinManager(QMainWindow):
         self.mode_button.setIcon(QIcon(self.PLAY_MODES_icons[self.play_mode_index]))
 
         # ── Дополнительный connect для url_input (returnPressed) ──────────
-        self.url_input.returnPressed.connect(self.add_url)
+        if(self.ui.get("url_input")):
+            self.ui["url_input"].returnPressed.connect(self.add_url)
 
         # ── Донастройка volume_slider ─────────────────────────────────────
         self.volume_slider.valueChanged.connect(
@@ -830,37 +827,43 @@ class SkinManager(QMainWindow):
         self.position_slider.sliderMoved.connect(self.on_seek_preview)
 
         # ── Донастройка таблицы ───────────────────────────────────────────
-        self.table.playlist = self.playlist
-        self.table.setColumnCount(2)
-        self.table.setHorizontalHeaderLabels(["Track", "Length"])
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().hide()
-        self.table.verticalHeader().hide()
-        self.table.setShowGrid(False)
-        self.table.setAlternatingRowColors(False)
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.table.cellDoubleClicked.connect(lambda row, _col: self.play_index(row))
-        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.table.customContextMenuRequested.connect(self.show_playlist_menu)
-        self.table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
-        self.table.verticalScrollBar().setSingleStep(1)
-        self.table.viewport().installEventFilter(self)
-        QScroller.grabGesture(self.table.viewport(), QScroller.LeftMouseButtonGesture)
 
-        scroller = QScroller.scroller(self.table.viewport())
-        props = QScrollerProperties()
-        props.setScrollMetric(QScrollerProperties.DragStartDistance, 0.004)
-        props.setScrollMetric(QScrollerProperties.DragVelocitySmoothingFactor, 0.6) # Сделали чуть отзывчивее
-        props.setScrollMetric(QScrollerProperties.ScrollingCurve, QEasingCurve(QEasingCurve.OutCubic))
-        scroller.setScrollerProperties(props)
+        self.table = self.ui.get("playlist_table")
+        if(self.table):
+            self.table.playlist = self.playlist
+            self.table.setColumnCount(2)
+            self.table.setHorizontalHeaderLabels(["Track", "Length"])
+            self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+            self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+            self.table.horizontalHeader().hide()
+            self.table.verticalHeader().hide()
+            self.table.setShowGrid(False)
+            self.table.setAlternatingRowColors(False)
+            self.table.setSelectionBehavior(QTableWidget.SelectRows)
+            self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+            self.table.cellDoubleClicked.connect(lambda row, _col: self.play_index(row))
+            self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+            self.table.customContextMenuRequested.connect(self.show_playlist_menu)
+            self.table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+            self.table.verticalScrollBar().setSingleStep(1)
+            self.table.viewport().installEventFilter(self)
+            QScroller.grabGesture(self.table.viewport(), QScroller.LeftMouseButtonGesture)
+
+            scroller = QScroller.scroller(self.table.viewport())
+            props = QScrollerProperties()
+            props.setScrollMetric(QScrollerProperties.DragStartDistance, 0.004)
+            props.setScrollMetric(QScrollerProperties.DragVelocitySmoothingFactor, 0.6) # Сделали чуть отзывчивее
+            props.setScrollMetric(QScrollerProperties.ScrollingCurve, QEasingCurve(QEasingCurve.OutCubic))
+            scroller.setScrollerProperties(props)
 
         # ── Политика размера playlistBox ──────────────────────────────────
-        self.playlistBox.setMinimumHeight(0)
-        sp = self.playlistBox.sizePolicy()
-        sp.setVerticalPolicy(QSizePolicy.Policy.Ignored)
-        self.playlistBox.setSizePolicy(sp)
+
+        if self.ui.get("playlistBox"):
+
+            self.ui["playlistBox"].setMinimumHeight(0)
+            sp = self.ui["playlistBox"].sizePolicy()
+            sp.setVerticalPolicy(QSizePolicy.Policy.Ignored)
+            self.ui["playlistBox"].setSizePolicy(sp)
 
 
         self.setCentralWidget(container)

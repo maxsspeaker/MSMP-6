@@ -64,13 +64,15 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QToolTip
 )
-from modules.other import GradientImageLabel,FixedComboBox,SystemMenuBar,get_ffmpeg_executable,LocalSaveDir,PlaylistWidget,AudioController,LoadConfigYaml,from_playlist_entry
+from modules.other import GradientImageLabel,FixedComboBox,SystemMenuBar,get_ffmpeg_executable,LocalSaveDir,PlaylistWidget,AudioController,LoadConfigYaml,load_playlist_data
 from modules.types import *
 from modules.pluginLoader import PluginLoader,PluginManagerWidget
 from modules.dbus import MprisServer
 from modules.ui_engine import UIEngine,SkinManager,WaveformSeekBar,WAVEFORM_BIN_COUNT,WAVEFORM_HEIGHT
 from modules.AudioStatsDb import AudioStatsDb
 from modules import extractors,utils
+
+from modules.recordlibrary import recordlibrary
 
 UIEngine.register("gradientImageLabel", GradientImageLabel)
 UIEngine.register("fixedComboBox",      FixedComboBox)
@@ -163,7 +165,6 @@ class VisualizerWindow(QWidget):
         self.peaks = [min(1.0, max(0.0, peak)) for peak in peaks]
         self.update()
 
-
     @Property(float)
     def visualizer_gain(self):
         return self._visualizer_gain
@@ -204,7 +205,6 @@ class VisualizerWindow(QWidget):
     @visualizer_min_visible_level.setter
     def visualizer_min_visible_level(self, number:float):
         self._visualizer_min_visible_level = number
-
 
     @Property(QColor)
     def barColorLow(self):
@@ -475,8 +475,8 @@ class WaveformTask(QRunnable):
 
 # Регистрируем кастомные виджеты после их объявления
 UIEngine.register("visualizerWindow", VisualizerWindow)
-UIEngine.register("qtablewidget", PlaylistWidget) #!!! legacy БУДЕТ УБРАНО В 6.1.1 исправьте кастомные скины!!!!
 UIEngine.register("playlistwidget", PlaylistWidget)
+UIEngine.register("recordlibrary", recordlibrary)
 
 class PlayerWindow(SkinManager,AudioController):
     MAX_RESTARTS = 3
@@ -612,17 +612,20 @@ class PlayerWindow(SkinManager,AudioController):
 
 
     def eventFilter(self, obj, event):
-        if obj == self.table.viewport() and event.type() == QEvent.Wheel:
-            delta = event.angleDelta().y()
-        
-            scroll_speed = 35 
-            current_value = self.table.verticalScrollBar().value()
-            new_value = current_value - (delta / 120) * scroll_speed
-            self.table.verticalScrollBar().setValue(int(new_value))
-        
-            return True
-        
-        return super().eventFilter(obj, event)
+        try: 
+            if obj == self.table.viewport() and event.type() == QEvent.Wheel:
+                delta = event.angleDelta().y()
+            
+                scroll_speed = 35 
+                current_value = self.table.verticalScrollBar().value()
+                new_value = current_value - (delta / 120) * scroll_speed
+                self.table.verticalScrollBar().setValue(int(new_value))
+            
+                return True
+            
+            return super().eventFilter(obj, event)
+        except AttributeError:
+            pass
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -1110,7 +1113,16 @@ class PlayerWindow(SkinManager,AudioController):
 
             self.stop_playback()
             self.table.current_index = None
-            self.playlist = self.from_playlist_data(data)
+            self.playlist = load_playlist_data(data)
+
+            self.playlist_title = str(data.get("title") or "MSMP5 Playlist")
+
+            self.playlist_image_url = str(
+                data.get("ImgUrl")
+                or data.get("img_url")
+                or "https://msmp.maxsspeaker.space/static/img/Missing.png"
+            )
+
             self.refresh_table()
             self.status_label.setText(f"Playlist loaded: {path}")
             self.emit_mpris_properties_changed("org.mpris.MediaPlayer2.Player", {
@@ -1149,25 +1161,6 @@ class PlayerWindow(SkinManager,AudioController):
             "Unavailable": item.unavailable,
             "load_error": item.load_error,
         }
-
-    def from_playlist_data(self, data) -> list[PlaylistItem]:
-        if isinstance(data, dict):
-            self.playlist_title = str(data.get("title") or "MSMP5 Playlist")
-            self.playlist_image_url = str(
-                data.get("ImgUrl")
-                or data.get("img_url")
-                or "https://msmp.maxsspeaker.space/static/img/Missing.png"
-            )
-            tracks = data.get("playlist")
-            if not isinstance(tracks, list):
-                raise ValueError("MSMP playlist must contain a playlist array")
-            return [from_playlist_entry(entry) for entry in tracks if isinstance(entry, dict)]
-
-        if isinstance(data, list):
-            self.playlist_title = "MSMP5 Playlist"
-            return [from_playlist_entry(entry) for entry in data if isinstance(entry, dict)]
-
-        raise ValueError("Playlist file must contain a JSON object or array")
 
     def update_current_metadata(self, item: PlaylistItem) -> None:
         self.set_metaData(

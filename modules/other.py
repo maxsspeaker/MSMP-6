@@ -215,7 +215,7 @@ class PlaylistWidget(QTableWidget):
         self._item_row_map = {}
 
         self.inlineAudio=inlineAudio # 12
-        self.rowHeight=rowHeight #44
+        self.DefalutRowHeight=rowHeight #44
 
         self.verticalScrollBar().valueChanged.connect(self.update_overlays_position)
         self.horizontalScrollBar().valueChanged.connect(self.update_overlays_position)
@@ -349,7 +349,7 @@ class PlaylistWidget(QTableWidget):
         
         self.setItem(row, 0, track_item)
         self.setItem(row, 1, length_item)
-        self.setRowHeight(row, self.rowHeight)
+        self.setRowHeight(row, self.DefalutRowHeight)
         self.apply_row_style(row)
 
     def apply_row_style(self, row: int) -> None:
@@ -789,24 +789,6 @@ class SystemMenuBar(QWidget):
 
 
 
-def from_playlist_entry(entry: dict) -> PlaylistItem:
-        page_url = entry.get("url") or entry.get("page_url")
-        if not page_url:
-            raise ValueError("Playlist entry has no url")
-
-        title = entry.get("name") or entry.get("title") or page_url
-        return PlaylistItem(
-            page_url=str(page_url),
-            title=str(title),
-            duration=int(entry.get("duration") or 0),
-            source_id=str(entry.get("ID") or entry.get("source_id") or "yt-dlp"),
-            uploader=str(entry.get("uploader") or ""),
-            album=str(entry.get("album") or ""),
-            artwork_url=str(entry.get("artwork_url") or entry.get("thumbnail") or ""),
-            publis=bool(entry.get("Publis") or entry.get("publis") or False),
-            unavailable=bool(entry.get("Unavailable") or entry.get("unavailable") or False),
-            load_error=str(entry.get("load_error") or ""),
-        )
 
 
 def LocalSaveDir():
@@ -844,3 +826,34 @@ def LoadConfigYaml():
         return config
 
 #....
+
+
+def from_playlist_entry(entry: dict) -> PlaylistItem:
+        page_url = entry.get("url") or entry.get("page_url")
+        if not page_url:
+            raise ValueError("Playlist entry has no url")
+
+        title = entry.get("name") or entry.get("title") or page_url
+        return PlaylistItem(
+            page_url=str(page_url),
+            title=str(title),
+            duration=int(entry.get("duration") or 0),
+            source_id=str(entry.get("ID") or entry.get("source_id") or "yt-dlp"),
+            uploader=str(entry.get("uploader") or ""),
+            album=str(entry.get("album") or ""),
+            artwork_url=str(entry.get("artwork_url") or entry.get("thumbnail") or ""),
+            publis=bool(entry.get("Publis") or entry.get("publis") or False),
+            unavailable=bool(entry.get("Unavailable") or entry.get("unavailable") or False),
+            load_error=str(entry.get("load_error") or ""),
+        )
+
+def load_playlist_data(data) -> list[PlaylistItem]:
+    if isinstance(data, dict):
+        tracks = data.get("playlist")
+        if not isinstance(tracks, list):
+            raise ValueError("MSMP playlist must contain a playlist array")
+        return [from_playlist_entry(entry) for entry in tracks if isinstance(entry, dict)]
+    if isinstance(data, list):
+        return [from_playlist_entry(entry) for entry in data if isinstance(entry, dict)]
+
+    raise ValueError("Playlist file must contain a JSON object or array")
