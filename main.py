@@ -1097,6 +1097,10 @@ class PlayerWindow(SkinManager,AudioController):
             QMessageBox.warning(self, "Save failed", str(exc))
 
     def load_playlist(self,path=None,isautosave=False) -> None:
+
+        if not(self.ui.get("playlist_table")):
+            return
+
         if not(path):
             path, _filter = QFileDialog.getOpenFileName(
                 self,
@@ -1335,8 +1339,9 @@ class PlayerWindow(SkinManager,AudioController):
 
     def mpris_metadata(self) -> dict:
         item = None
-        if self.table.current_index is not None and 0 <= self.table.current_index < len(self.playlist):
-            item = self.playlist[self.table.current_index]
+        if(self.ui.get("playlist_table")):
+            if self.table.current_index is not None and 0 <= self.table.current_index < len(self.playlist):
+                item = self.playlist[self.table.current_index]
 
         if item is None:
             return MprisServer.empty_metadata()
@@ -1522,6 +1527,7 @@ class PlayerWindow(SkinManager,AudioController):
             item.duration,
             self.waveform_signals,
             self.config["cookies"]["browser"],
+            proxy=self.proxy.get()
         )
         task.setAutoDelete(True)
         self.thread_pool.start(task)

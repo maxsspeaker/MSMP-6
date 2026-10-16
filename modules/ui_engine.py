@@ -754,6 +754,7 @@ class SkinManager(QMainWindow):
         self.position_slider     = self.ui["position_slider"]
         self.volume_slider       = self.ui["volume_slider"]
         self.status_label        = self.ui["status_label"]
+        self.url_input           = self.ui["url_input"]
         #self.add_button          = self.ui["add_button"]
         #self.clear_button        = self.ui["clear_button"]
         #self.save_button         = self.ui["save_button"]
@@ -859,7 +860,7 @@ class SkinManager(QMainWindow):
         # ── Политика размера playlistBox ──────────────────────────────────
 
         if self.ui.get("playlistBox"):
-
+            
             self.ui["playlistBox"].setMinimumHeight(0)
             sp = self.ui["playlistBox"].sizePolicy()
             sp.setVerticalPolicy(QSizePolicy.Policy.Ignored)
