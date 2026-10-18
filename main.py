@@ -64,7 +64,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QToolTip
 )
-from modules.other import GradientImageLabel,FixedComboBox,SystemMenuBar,get_ffmpeg_executable,LocalSaveDir,PlaylistWidget,AudioController,LoadConfigYaml,load_playlist_data
+from modules.other import GradientImageLabel,MarqueeLabel,FixedComboBox,SystemMenuBar,get_ffmpeg_executable,LocalSaveDir,PlaylistWidget,AudioController,LoadConfigYaml,load_playlist_data
 from modules.types import *
 from modules.pluginLoader import PluginLoader,PluginManagerWidget
 from modules.dbus import MprisServer
@@ -475,6 +475,7 @@ class WaveformTask(QRunnable):
 
 # Регистрируем кастомные виджеты после их объявления
 UIEngine.register("visualizerWindow", VisualizerWindow)
+UIEngine.register("label", MarqueeLabel)
 UIEngine.register("playlistwidget", PlaylistWidget)
 UIEngine.register("recordlibrary", recordlibrary)
 
@@ -590,6 +591,8 @@ class PlayerWindow(SkinManager,AudioController):
 
         self._plugin_manager=PluginManagerWidget(self.plugin_loader.plugins_dir,self.config)
 
+        self.fpodManager=utils.FpodManager(self)
+
         self._init_ui()
 
         self.player.positionChanged.connect(self.on_position_changed)
@@ -604,11 +607,17 @@ class PlayerWindow(SkinManager,AudioController):
 
         self.setup_mpris()
 
+        if not(self.config.get("volume")==None):
+            self.volume_slider.setValue(self.config["volume"])
+        else:
+            self.config["volume"]=1
+
         self.plugin_loader.init_all(context=self)
 
 
         if(os.path.isfile(os.path.join(LocalSaveDir(),"autosave.plmsmpsbox"))):
             self.load_playlist(path=os.path.join(LocalSaveDir(),"autosave.plmsmpsbox"),isautosave=True)
+        self.events.on_app_loading_finished.emit()
 
 
     def eventFilter(self, obj, event):
@@ -684,8 +693,18 @@ class PlayerWindow(SkinManager,AudioController):
         if self.resolverManager.resolving_indexes.get(self.table.link_dynamic_item(index)):
             return
 
+        if(type=="audio" or type=="video"):
+            local_audio=self.fpodManager.get_local_audio(self.playlist[index])
+            if(local_audio):
+                self.playlist[index].stream_url=local_audio
+                if(auto_play):
+                    self.start_playback(index)
+                return
+
+
         self.table.setItemLoading(index,True)
         link_index=self.table.link_dynamic_item(index)
+
 
         self.resolverManager.addTask(link_index,self.plugin_loader.find_resolver(
             link_index,
@@ -1664,12 +1683,14 @@ class PlayerWindow(SkinManager,AudioController):
     def on_volume_slider_changed(self, value: int) -> None:
         """Слот для volume_slider из XML (connect=). Делегирует в оба получателя."""
         self.audio_output.setVolume(value / 100)
+        self.config["volume"]=value
         self.on_volume_changed(value)
 
 
     def closeEvent(self, event) -> None:
         if(self.db):
             self.db.close()
+            self.fpodManager.db.close()
 
 
         try:

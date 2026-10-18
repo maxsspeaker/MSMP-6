@@ -1,12 +1,14 @@
 import random,hashlib
 import os,sys
+
 from PySide6.QtWidgets import (
     QApplication, QWidget, QPushButton, QVBoxLayout,QTableWidget, QProgressBar,
-    QHBoxLayout, QGraphicsOpacityEffect, QLabel, QGraphicsBlurEffect,QComboBox,QFrame,QStyleOptionViewItem,QListView,QStyledItemDelegate, QStyle,QMenu, QStyleOption,QTableWidgetItem,QAbstractItemView,QSizePolicy
+    QHBoxLayout, QGraphicsOpacityEffect, QLabel, QGraphicsBlurEffect,QComboBox,QFrame,QStyleOptionViewItem,QListView,QStyledItemDelegate,QSizePolicy, QStyle,QMenu, QStyleOption,QTableWidgetItem,QAbstractItemView,QSizePolicy
 )
 from PySide6.QtGui import QColor,QPixmap, QPainter, QLinearGradient, QImage,QPalette, QPen, QBrush,QAction,QFont,QPalette
-from PySide6.QtCore import QPropertyAnimation, QRect, QEasingCurve, Qt, Signal,QObject, QProcess,QParallelAnimationGroup,QSize, Slot,QPersistentModelIndex,Property
+from PySide6.QtCore import QPropertyAnimation, QRect, QEasingCurve, Qt, Signal,QObject, QProcess,QParallelAnimationGroup,QSize, Slot,QPersistentModelIndex,Property,QTimer
 from PySide6.QtMultimedia import QAudioOutput, QMediaDevices, QMediaPlayer,QAudioBufferOutput, QAudioDevice
+
 from .types import PlaylistItem
 import __main__ 
 import re
@@ -103,7 +105,92 @@ class GradientImageLabel(QLabel):
         super().resizeEvent(event)
         self.update_gradient_mask()
 
+class MarqueeLabel(QLabel):
+    def __init__(self, parent_or_text=None, parent=None, **kwargs):
+        # 1. Распознаем аргументы: текст это или родительский виджет
+        if isinstance(parent_or_text, str):
+            text = parent_or_text
+            actual_parent = parent
+        else:
+            text = ""
+            actual_parent = parent_or_text
+            
+        # 2. Перехватываем text из именованных аргументов (если передано text="...")
+        if 'text' in kwargs:
+            text = kwargs.pop('text')
 
+        # Инициализируем оригинальный QLabel пустой строкой
+        super().__init__("", actual_parent, **kwargs)
+        
+        # Надежно сохраняем текст в виде строки
+        self._real_text = str(text) if text else ""
+        self._offset = 0
+        self._spacing = 30
+        self._speed = 1
+        
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._update_scroll)
+        self._timer.start(20)
+
+    def text(self):
+        return self._real_text
+
+    def setText(self, text):
+        # На всякий случай приводим любой входной текст к строке
+        self._real_text = str(text) if text is not None else ""
+        self._offset = 0
+        self.update()
+
+    def minimumSizeHint(self):
+        base_size = super().minimumSizeHint()
+        return QSize(1, base_size.height())
+
+    def sizeHint(self):
+        base_size = super().sizeHint()
+        return QSize(100, base_size.height())
+
+    def _update_scroll(self):
+        if not self._real_text:
+            return
+            
+        fm = self.fontMetrics()
+        text_width = fm.horizontalAdvance(self._real_text)
+        content_width = self.contentsRect().width()
+        
+        if text_width > content_width:
+            self._offset -= self._speed
+            if abs(self._offset) >= text_width + self._spacing:
+                self._offset = 0
+            self.update()
+        else:
+            self._offset = 0
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        
+        if not self._real_text:
+            return
+
+        painter = QPainter(self)
+        painter.setPen(self.palette().color(QPalette.WindowText))
+        
+        rect = self.contentsRect()
+        painter.setClipRect(rect)
+
+        fm = self.fontMetrics()
+        text_width = fm.horizontalAdvance(self._real_text)
+
+        if text_width > rect.width():
+            rect1 = QRect(rect.left() + self._offset, rect.top(), text_width, rect.height())
+            painter.drawText(rect1, Qt.AlignVCenter | Qt.AlignLeft, self._real_text)
+
+            rect2 = QRect(rect.left() + self._offset + text_width + self._spacing, rect.top(), text_width, rect.height())
+            painter.drawText(rect2, Qt.AlignVCenter | Qt.AlignLeft, self._real_text)
+        else:
+            painter.drawText(rect, Qt.AlignVCenter | Qt.AlignLeft, self._real_text)
+            
 class AudioController():
 
     def _init_player(self):

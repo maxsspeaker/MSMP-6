@@ -1,10 +1,12 @@
 import sys,os
 from PySide6.QtWidgets import QApplication, QDialog, QLabel, QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, QCheckBox
 
+from modules.other import LocalSaveDir
+from modules.AudioStatsDb import LocalAudioDb
 
 
 class proxyManager():
-    """docstring for proxyManager"""
+    """Proxy Manager support for only Linux"""
     def __init__(self, config):
 
         if (config==None):
@@ -14,6 +16,8 @@ class proxyManager():
         self.SOCKS5_port = str(config.get("SOCKS5_port","1080"))
 
         self.proxyEnabled=config.get("enabled",False)
+
+        #window = InputDialog()
 
         #PROXYCHAINS_SOCKS5_HOST=127.0.0.1 PROXYCHAINS_SOCKS5_PORT=4321 proxychains 
 
@@ -115,15 +119,20 @@ class InputDialog(QDialog):
 
 
 
+class FpodManager():
+    """Менеджер загрузки музыки, здесь должен код для синхронизации с настоящей желекой. Но у меня нету денег на сборку raspberry pi zero плеера("""
+    def __init__(self,main_window):
+        self.main_window=main_window
 
-def main() -> int:
-
-    app = QApplication(sys.argv)
-
-    window = InputDialog()
-    window.show() 
-    return app.exec()
+        self.db = LocalAudioDb(db_name=os.path.join(LocalSaveDir(),"LocalMusic.db"))
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+    def _fast_scan_folder(self,path):
+        with os.scandir(path) as entries:
+            return sum(1 for _ in entries)
+
+
+
+    def get_local_audio(self,audio):
+        return None
+

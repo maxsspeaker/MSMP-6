@@ -19,6 +19,7 @@ class PlaylistItem:
     media_type: str = "audio"
     waveform: list[float] = field(default_factory=list)
     waveform_ready: bool = False
+    id: str = ""
 
 
 
@@ -39,6 +40,7 @@ class PlayerEvents(QObject):
     on_playlist_saved = Signal(str, list)      # Передаем путь к плейлисту (str) и кол-во треков (int)
     
     # Жизненный цикл программы
+    on_app_loading_finished = Signal()         # Программа Загрузилась
     on_app_closing = Signal()                  # Программа закрывается 
 
 

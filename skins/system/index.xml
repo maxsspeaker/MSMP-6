@@ -49,13 +49,13 @@
                      stretch="1">
                 <!-- верхний распор -->
                 <qwidget stretch="1" />
-                <qlabel id="track_title_label"
+                <label id="track_title_label"
                         style="color:#f5f5f5; font-size:19px; font-weight:700;
                                margin:2px; margin-left:10px;" />
-                <qlabel id="artist_label"
+                <label id="artist_label"
                         style="color:#a8a8a8; font-size:14px;
                                margin:2px; margin-left:10px;" />
-                <qlabel id="album_label"
+                <label id="album_label"
                         style="color:#a8a8a8; font-size:14px;
                                margin:2px; margin-left:10px;" />
                 <!-- нижний распор -->
@@ -141,7 +141,7 @@
     </qwidget>
 
     <!-- Статусная строка -->
-    <qlabel id="status_label" text="Ready"
+    <label id="status_label" text="Ready"
             style="color:#8f8f8f; padding:5px 10px; border-top:1px solid #161616;" />
 
 </qwidget>
