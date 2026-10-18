@@ -1816,7 +1816,7 @@ def main() -> int:
         window.show() 
 
     if (sys.platform == "win32"):
-        utils.fuck_mircoslop_trash_desing(main_win)
+        utils.fuck_mircoslop_trash_desing(window)
     return app.exec()
 
 
