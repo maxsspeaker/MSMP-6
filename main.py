@@ -1813,7 +1813,7 @@ def main() -> int:
         window.show() 
 
     if (sys.platform == "win32"):
-        utils.apply_dark_title_bar(main_win)
+        utils.fuck_mircoslop_trash_desing(main_win)
     return app.exec()
 
 

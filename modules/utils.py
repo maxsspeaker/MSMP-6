@@ -122,21 +122,31 @@ class InputDialog(QDialog):
     def get_data(self):
         return self.hostAdress_line.text(), self.token_line.text()
 
-def apply_dark_title_bar(window):
-    """Чёрный заголовок окна"""
+def fuck_mircoslop_trash_desing(window):
+    """fuck windows 11 slop trash desing! sharp are angles are fuking better"""
     hwnd = int(window.winId())
-
-    value = ctypes.c_int(1)
+    
     try:
+        # Dark window titlebar
+        dark_mode = ctypes.c_int(1)
         ctypes.windll.dwmapi.DwmSetWindowAttribute(
             hwnd,
             20,
-            ctypes.byref(value),
-            ctypes.sizeof(value),
+            ctypes.byref(dark_mode),
+            ctypes.sizeof(dark_mode),
         )
+        
+        # Sharp Angles
+        square_corners = ctypes.c_int(1)
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            hwnd,
+            33,
+            ctypes.byref(square_corners),
+            ctypes.sizeof(square_corners),
+        )
+        
     except Exception as e:
-        print(f"Не удалось применить тему WinAPI: {e}")
-
+        print(f"Ошибка при применении стилей WinAPI: {e}")
 
 class FpodManager():
     """Менеджер загрузки музыки, здесь должен код для синхронизации с настоящей желекой. Но у меня нету денег на сборку raspberry pi zero плеера("""
