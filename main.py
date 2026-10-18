@@ -525,7 +525,10 @@ class PlayerWindow(SkinManager,AudioController):
         self.setWindowTitle("MSMP FoxWave")
         self.resize(820, 760)
 
-        self.setWindowIcon(QIcon("resources/MSMPicon.png"))
+        if (sys.platform == "win32"):
+            self.setWindowIcon(QIcon("resources/MSMPwave.png"))
+        else:
+            self.setWindowIcon(QIcon("resources/MSMPicon.png"))
         self.events = PlayerEvents()
 
         self.cookie_data = ["", "firefox", "chrome", "chromium", "brave", "edge"]
