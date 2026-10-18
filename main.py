@@ -1811,6 +1811,9 @@ def main() -> int:
         window.showFullScreen()
     else:
         window.show() 
+
+    if (sys.platform == "win32"):
+        utils.apply_dark_title_bar(main_win)
     return app.exec()
 
 

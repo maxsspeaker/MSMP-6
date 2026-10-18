@@ -4,6 +4,8 @@ from PySide6.QtWidgets import QApplication, QDialog, QLabel, QLineEdit, QPushBut
 from modules.other import LocalSaveDir
 from modules.AudioStatsDb import LocalAudioDb
 
+import ctypes
+
 
 class proxyManager():
     """Proxy Manager support for only Linux"""
@@ -24,6 +26,10 @@ class proxyManager():
 
     def restartWithProxy(self,mainwindow):
         if not(self.proxyEnabled):
+            return
+        if (sys.platform == "win32"):
+            self.proxyEnabled=False
+            print("[PROXY] Unsupported platform")
             return
         LD_PRELOAD=os.environ.get("LD_PRELOAD","")
 
@@ -116,7 +122,20 @@ class InputDialog(QDialog):
     def get_data(self):
         return self.hostAdress_line.text(), self.token_line.text()
 
+def apply_dark_title_bar(window):
+    """Чёрный заголовок окна"""
+    hwnd = int(window.winId())
 
+    value = ctypes.c_int(1)
+    try:
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            hwnd,
+            20,
+            ctypes.byref(value),
+            ctypes.sizeof(value),
+        )
+    except Exception as e:
+        print(f"Не удалось применить тему WinAPI: {e}")
 
 
 class FpodManager():
