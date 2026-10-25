@@ -997,23 +997,23 @@ class SkinManager(QMainWindow):
 
         # Если вы добовляете какое-то действие связанное с интерфейсом и его работой. Делайте отключение здесь!
 
-        current_index=self.table.current_index
+        current_index=self.playlistManager.current_index
+
 
         if(self.visualizer_window):
             self.audio_buffer_output.audioBufferReceived.disconnect(self.on_audio_buffer_received) # пример прямо здесь
 
         self._init_ui() 
         self.refresh_table()
-        self.table.current_index=current_index
         if current_index is not None:
-            self.update_current_metadata(self.playlist[self.table.current_index])
+            self.update_current_metadata(self.playlistManager.playlist[self.playlistManager.current_index])
             self.table.apply_row_style(current_index)
 
             if isinstance(self.ui.get("position_slider"), WaveformSeekBar):
-                if not self.playlist[self.table.current_index].waveform == []:
-                    self.position_slider.set_waveform(self.playlist[self.table.current_index].waveform)
+                if not self.playlistManager.playlist[self.playlistManager.current_index].waveform == []:
+                    self.position_slider.set_waveform(self.playlistManager.playlist[self.playlistManager.current_index].waveform)
                 else:
-                    self.request_waveform_generation(self.table.current_index)
+                    self.request_waveform_generation(self.playlistManager.current_index)
             self.position_slider.setRange(0, max(0, self.player.duration()))
             self.update_buffer_progress(0.0)
             
