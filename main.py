@@ -8,6 +8,7 @@ import threading
 import traceback
 import time
 import os
+import signal
 import webbrowser
 from dataclasses import dataclass, field
 from typing import Optional
@@ -1705,6 +1706,12 @@ def excepthook(exc_type, exc_value, exc_tb):
     tb = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
     print(tb)
 
+
+def sigint_handler(signum, frame):
+    QApplication.quit() # или sys.exit(0)
+
+
+
 def main() -> int:
 
     parser = argparse.ArgumentParser(description="MSMP FoxWave media player")
@@ -1754,6 +1761,7 @@ def main() -> int:
 
     if (sys.platform == "win32"):
         utils.fuck_mircoslop_trash_desing(window)
+    signal.signal(signal.SIGINT, sigint_handler)
     return app.exec()
 
 
