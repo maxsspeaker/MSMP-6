@@ -165,3 +165,18 @@ class FpodManager():
     def get_local_audio(self,audio):
         return None
 
+
+class AirFoxManager():
+    """Менеджер умных колонок с MSMP FoxWave в режиме headless (code-name: WaveStation)"""
+    def __init__(self,main_window):
+        self.main_window=main_window
+
+    def scan_airfox(self):
+        pass
+
+    def connect(self,address):
+        pass
+
+    def disconnect(self):
+        pass
+

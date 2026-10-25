@@ -64,7 +64,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QToolTip
 )
-from modules.other import GradientImageLabel,MarqueeLabel,FixedComboBox,SystemMenuBar,get_ffmpeg_executable,LocalSaveDir,PlaylistWidget,AudioController,LoadConfigYaml,load_playlist_data
+from modules.other import GradientImageLabel,MarqueeLabel,FixedComboBox,SystemMenuBar,get_ffmpeg_executable,LocalSaveDir,PlaylistWidget,AudioController,LoadConfigYaml,load_playlist_data,PlaylistManager
 from modules.types import *
 from modules.pluginLoader import PluginLoader,PluginManagerWidget
 from modules.dbus import MprisServer
@@ -80,17 +80,6 @@ UIEngine.register("systemmenubar",      SystemMenuBar)
 
 
 ERROR_REPORTER: Optional["ErrorReporter"] = None
-
-
-
-def is_video_unavailable_error(error: str) -> bool:
-    message = error.lower()
-    return (
-        "video unavailable" in message
-        or "this video is not available" in message
-    )
-
-
 
 class ErrorReporter(QObject):
     error_requested = Signal(str, str)
@@ -497,11 +486,11 @@ class PlayerWindow(SkinManager,AudioController):
         menu.addAction(action1)
 
         action2 = QAction("Предзагрузить метаданные", self)
-        action2.triggered.connect(lambda: self.resolve_item(self.table.rowAt(position.y())))
+        action2.triggered.connect(lambda: self.playlistManager.resolve_item(self.table.rowAt(position.y())))
         menu.addAction(action2)
 
         action3 = QAction("Открыть расположение", self)
-        action3.triggered.connect(lambda: webbrowser.open(self.playlist[index.row()].page_url))
+        action3.triggered.connect(lambda: webbrowser.open(self.playlistManager.playlist[index.row()].page_url))
         menu.addAction(action3)
 
         menu.addSeparator()
@@ -520,7 +509,7 @@ class PlayerWindow(SkinManager,AudioController):
 
         menu.exec(self.table.viewport().mapToGlobal(position))
 
-    def __init__(self,skin: str) -> None:
+    def __init__(self,args) -> None:
         super().__init__()
         self.setWindowTitle("MSMP FoxWave")
         self.resize(820, 760)
@@ -541,7 +530,7 @@ class PlayerWindow(SkinManager,AudioController):
         self.proxy.restartWithProxy(self)
 
         print(self.config)
-        if not(skin=="default"):
+        if not(args.skin=="default"):
             self.config["skin"]=skin
 
         if (sys.platform == "linux"):
@@ -550,15 +539,14 @@ class PlayerWindow(SkinManager,AudioController):
         self.plugin_loader = PluginLoader(self.config)
         self.plugin_loader.load_allowed(context=self)
 
-        self.playlist: list[PlaylistItem] = []
+        self.playlistManager = PlaylistManager(self)
+
         self.pending_position = 0
         self.restart_attempts = 0
         self.user_dragging = False
-        self.resolve_autoplay = None
-        self.play_mode_index = 0
         self.error_boxes: list[QMessageBox] = []
-        self.playlist_title = "MSMP6 Playlist"
-        self.playlist_image_url = "https://msmp.maxsspeaker.space/static/img/Missing.png"
+
+        self.ui={}
 
 
         self.mpris_server = MprisServer()
@@ -596,6 +584,8 @@ class PlayerWindow(SkinManager,AudioController):
 
         self.fpodManager=utils.FpodManager(self)
 
+        self.airFoxManager=utils.AirFoxManager(self)
+
         self._init_ui()
 
         self.player.positionChanged.connect(self.on_position_changed)
@@ -610,10 +600,11 @@ class PlayerWindow(SkinManager,AudioController):
 
         self.setup_mpris()
 
-        if not(self.config.get("volume")==None):
-            self.volume_slider.setValue(self.config["volume"])
-        else:
-            self.config["volume"]=1
+        if(self.ui.get("volume_slider")):
+             if not(self.config.get("volume")==None):
+                 self.volume_slider.setValue(self.config["volume"])
+             else:
+                 self.config["volume"]=1
 
         self.plugin_loader.init_all(context=self)
 
@@ -655,79 +646,33 @@ class PlayerWindow(SkinManager,AudioController):
         parsed=extractors.parse_youtube_link(url)
 
         if(parsed["type"]=="video&playlist"):
-            self.add_url_value(url,type="video")
+            self.playlistManager.add_url_value(url,type="video")
 
         elif(parsed["type"]=="playlist"):
-            self.add_url_value(url,type="playlist")
+            self.playlistManager.add_url_value(url,type="playlist")
         elif(parsed["type"]=="video"):
-            self.add_url_value(url,type="video")
+            self.playlistManager.add_url_value(url,type="video")
         else:
             type,source_id=self.plugin_loader.Source_resolver(url)
             if(type=="audio"):
-                self.add_url_value(url,source_id=source_id,type="audio")
+                self.playlistManager.add_url_value(url,source_id=source_id,type="audio")
             elif(type=="playlist"):
-                self.add_url_value(url,source_id=source_id,type="playlist")
+                self.playlistManager.add_url_value(url,source_id=source_id,type="playlist")
             else:
-                self.add_url_value(url,type=None)
+                self.playlistManager.add_url_value(url,type=None)
 
         self.url_input.clear()
 
 
-    def add_url_value(self, url: str, auto_play: bool = False,source_id="youtube",type="audio") -> None:
-        row = len(self.playlist)
-        self.playlist.append(PlaylistItem(page_url=url,source_id=source_id))
-        self.table.insertRow(row)
-        self.table.update_row(row, self.playlist[row])
-        self.status_label.setText("Resolving stream...")
-        self.emit_mpris_properties_changed("org.mpris.MediaPlayer2.Player", {
-            "CanGoNext": bool(self.playlist),
-            "CanGoPrevious": bool(self.playlist),
-            "CanPlay": bool(self.playlist),
-        })
-        self.resolve_item(row, auto_play=auto_play,type=type)
-
-    def resolve_item(self, index: int, auto_play: bool = False,type="audio") -> None:
-        if index < 0 or index >= len(self.playlist):
-            return
-
-        if(auto_play):
-            self.resolve_autoplay = index
-
-        if self.resolverManager.resolving_indexes.get(self.table.link_dynamic_item(index)):
-            return
-
-        if(type=="audio" or type=="video"):
-            local_audio=self.fpodManager.get_local_audio(self.playlist[index])
-            if(local_audio):
-                self.playlist[index].stream_url=local_audio
-                if(auto_play):
-                    self.start_playback(index)
-                return
-
-
-        self.table.setItemLoading(index,True)
-        link_index=self.table.link_dynamic_item(index)
-
-
-        self.resolverManager.addTask(link_index,self.plugin_loader.find_resolver(
-            link_index,
-            self.playlist[index],
-            self.resolve_signals,
-            self.config["cookies"]["browser"],
-            proxy=self.proxy.get(),
-            type=type
-        ))
-
-
     def parse_jam_playlist(self, index: Optional[int]=None,url: Optional[str] = None,source_id="youtube") -> None:
-        self.resolve_item(index,type="jamplaylist_youtube")
+        self.playlistManager.resolve_item(index,type="jamplaylist_youtube")
 
     def on_jam_playlist_status(
         self,
         status: str,
     ) -> None:
 
-        self.status_label.setText(status)
+        self.update_status_bar(status)
 
     def on_jam_playlist_parsed(
         self,
@@ -736,41 +681,41 @@ class PlayerWindow(SkinManager,AudioController):
         playlist_title: str,
     ) -> None:
         if not isinstance(items, list) or not items:
-            self.status_label.setText("Jam playlist is empty")
+            self.update_status_bar("Jam playlist is empty")
             return
 
         parsed_items = [item for item in items if isinstance(item, PlaylistItem)]
         if not parsed_items:
-            self.status_label.setText("Jam playlist is empty")
+            self.update_status_bar("Jam playlist is empty")
             return
 
         self.stop_playback()
-        self.playlist_title = playlist_title or "Jam playlist"
-        self.playlist = parsed_items
-        self.table.current_index = None
+        self.playlistManager.playlist_title = playlist_title or "Jam playlist"
+        self.playlistManager.playlist = parsed_items
+        self.playlistManager.current_index = None
         self.pending_position = 0
         self.restart_attempts = 0
         self.resolverManager.clear()
-        self.resolve_autoplay = None
+        self.playlistManager.resolve_autoplay = None
         self.refresh_table()
         self.emit_mpris_properties_changed("org.mpris.MediaPlayer2.Player", {
-            "CanGoNext": bool(self.playlist),
-            "CanGoPrevious": bool(self.playlist),
-            "CanPlay": bool(self.playlist),
+            "CanGoNext": bool(self.playlistManager.playlist),
+            "CanGoPrevious": bool(self.playlistManager.playlist),
+            "CanPlay": bool(self.playlistManager.playlist),
             "CanSeek": False,
             "Metadata": self.mpris_metadata(),
             "PlaybackStatus": "Stopped",
             "Position": 0,
         })
 
-        self.status_label.setText(f"Jam playlist loaded: {len(self.playlist)} tracks")
-        if self.playlist:
+        self.update_status_bar(f"Jam playlist loaded: {len(self.playlistManager.playlist)} tracks")
+        if self.playlistManager.playlist:
             self.play_index(0)
 
     def on_jam_playlist_failed(self, index: int, error: str, details: str = "") -> None:
-        title = self.playlist[index].page_url if 0 <= index < len(self.playlist) else "item"
+        title = self.playlistManager.playlist[index].page_url if 0 <= index < len(self.playlistManager.playlist) else "item"
         message = f"Jam parse failed for {title}: {error}"
-        self.status_label.setText(message)
+        self.update_status_bar(message)
         console_details = details or message
         print(console_details, file=sys.stderr, flush=True)
         logging.error("%s\n%s", message, console_details)
@@ -791,11 +736,11 @@ class PlayerWindow(SkinManager,AudioController):
         index=self.table.get_dynamic_item(index)
         if index is None:
             return
-        auto_play = self.resolve_autoplay
-        if index < 0 or index >= len(self.playlist):
+        auto_play = self.playlistManager.resolve_autoplay
+        if index < 0 or index >= len(self.playlistManager.playlist):
             return
 
-        if not item.page_url==self.playlist[index].page_url:
+        if not item.page_url==self.playlistManager.playlist[index].page_url:
             return
 
         cached_waveform = self.waveform_cache.get(item.page_url)
@@ -803,12 +748,12 @@ class PlayerWindow(SkinManager,AudioController):
             item.waveform = cached_waveform
             item.waveform_ready = True
 
-        self.playlist[index] = item
+        self.playlistManager.playlist[index] = item
         self.table.setItemLoading(index,False)
         self.table.update_row(index, item)
-        self.status_label.setText(f"Resolved: {item.title}")
+        self.update_status_bar(f"Resolved: {item.title}")
 
-        if self.table.current_index == index:
+        if self.playlistManager.current_index == index:
             self.update_current_metadata(item)
 
         if not auto_play == None:
@@ -825,13 +770,11 @@ class PlayerWindow(SkinManager,AudioController):
         index=self.table.get_dynamic_item(index)
         if not(index==None):
             self.table.setItemLoading(index,False)
-            if(index==self.resolve_autoplay):
-                self.resolve_autoplay=None
-            if 0 <= index < len(self.playlist):
-                item = self.playlist[index]
+            if 0 <= index < len(self.playlistManager.playlist):
+                item = self.playlistManager.playlist[index]
                 item.stream_url = ""
                 item.load_error = error
-                item.unavailable = is_video_unavailable_error(error)
+                item.unavailable = True
                 if item.title == "Loading...":
                     item.title = "Video unavailable" if item.unavailable else "Resolve failed"
                 self.table.update_row(index, item)
@@ -840,20 +783,24 @@ class PlayerWindow(SkinManager,AudioController):
                 title = "item"
 
         message = f"yt-dlp failed: {error}"
-        self.status_label.setText(message)
+        self.update_status_bar(message)
         console_details = details or message
         print(console_details, file=sys.stderr, flush=True)
         logging.error("%s\n%s", message, console_details)
 
-        box = QMessageBox(self)
-        box.setIcon(QMessageBox.Warning)
-        box.setWindowTitle("yt-dlp error")
-        box.setText(error)
-        if details:
-            box.setDetailedText(details)
-        self.error_boxes.append(box)
-        box.finished.connect(lambda _result, item=box: self.release_error_box(item))
-        box.open()
+        if not(index==None):
+            if(index==self.playlistManager.resolve_autoplay):
+                box = QMessageBox(self)
+                box.setIcon(QMessageBox.Warning)
+                box.setWindowTitle("yt-dlp error")
+                box.setText(error)
+                if details:
+                    box.setDetailedText(details)
+                self.error_boxes.append(box)
+                box.finished.connect(lambda _result, item=box: self.release_error_box(item))
+                box.open()
+
+            self.playlistManager.resolve_autoplay=None
 
     def release_error_box(self, box: QMessageBox) -> None:
         if box in self.error_boxes:
@@ -863,35 +810,35 @@ class PlayerWindow(SkinManager,AudioController):
 
 
     def refresh_row_style(self, row: Optional[int]) -> None:
-        if row is not None and 0 <= row < len(self.playlist):
+        if row is not None and 0 <= row < len(self.playlistManager.playlist):
             self.table.apply_row_style(row)
 
     def refresh_table(self) -> None:
         self.table.clearPlaylistView()
-        self.table.setPlaylist(self.playlist)
+        self.table.setPlaylist(self.playlistManager.playlist)
 
     def play_selected_or_current(self) -> None:
         selected = self.table.currentRow()
 
-        if self.table.current_index is not None and self.player.playbackState() == QMediaPlayer.PausedState:
+        if self.playlistManager.current_index is not None and self.player.playbackState() == QMediaPlayer.PausedState:
             self.player.play()
             self.start_mpris_position_updates()
             self.sync_mpris_position()
             self.set_mpris_playback_status("Playing")
             return
 
-        if selected >= 0 and selected != self.table.current_index:
+        if selected >= 0 and selected != self.playlistManager.current_index:
             self.play_index(selected)
             return
 
-        if self.table.current_index is not None:
+        if self.playlistManager.current_index is not None:
             if(self.db):
-                self.db.increment_plays(self.playlist[self.table.current_index])
+                self.db.increment_plays(self.playlistManager.playlist[self.playlistManager.current_index])
             self.player.play()
             self.start_mpris_position_updates()
             self.sync_mpris_position()
             self.set_mpris_playback_status("Playing")
-        elif self.playlist:
+        elif self.playlistManager.playlist:
             self.play_index(0)
 
         self.events.on_playback_started.emit()
@@ -927,29 +874,29 @@ class PlayerWindow(SkinManager,AudioController):
         })
 
     def play_index(self, index: int) -> None:
-        if index < 0 or index >= len(self.playlist):
+        if index < 0 or index >= len(self.playlistManager.playlist):
             return
 
         self.pending_position = 0
         self.restart_attempts = 0
-        item = self.playlist[index]
+        item = self.playlistManager.playlist[index]
 
         if item.stream_url:
             self.start_playback(index)
         else:
-            self.status_label.setText("Resolving stream...")
-            self.resolve_item(index, auto_play=True)
+            self.update_status_bar("Resolving stream...")
+            self.playlistManager.resolve_item(index, auto_play=True)
 
     def start_playback(self, index: int) -> None:
-        item = self.playlist[index]
-        previous_index = self.table.current_index
-        self.table.current_index = index
+        item = self.playlistManager.playlist[index]
+        previous_index = self.playlistManager.current_index
+        self.playlistManager.current_index = index
         self.table.selectRow(index)
         self.refresh_row_style(previous_index)
         self.refresh_row_style(index)
         self.update_current_metadata(item)
         
-        self.resolve_autoplay=None
+        self.playlistManager.resolve_autoplay=None
 
         self._last_mpris_position_us = -1
         if isinstance(self.position_slider, WaveformSeekBar):
@@ -962,7 +909,7 @@ class PlayerWindow(SkinManager,AudioController):
         self.sync_mpris_position(0)
 
         self.set_mpris_playback_status("Playing")
-        self.status_label.setText(f"Playing: {item.title}")
+        self.update_status_bar(f"Playing: {item.title}")
         self.emit_mpris_properties_changed("org.mpris.MediaPlayer2.Player", {
             "Metadata": self.mpris_metadata(),
             "PlaybackStatus": self.mpris_playback_status,
@@ -988,10 +935,10 @@ class PlayerWindow(SkinManager,AudioController):
                 self.db.increment_plays(item)
 
     def play_next(self) -> None:
-        if not self.playlist:
+        if not self.playlistManager.playlist:
             return
 
-        if self.table.current_index is None:
+        if self.playlistManager.current_index is None:
             self.play_index(0)
             return
 
@@ -1002,21 +949,21 @@ class PlayerWindow(SkinManager,AudioController):
         self.play_index(next_index)
 
     def play_previous(self) -> None:
-        if not self.playlist:
+        if not self.playlistManager.playlist:
             return
 
-        if self.table.current_index is None:
+        if self.playlistManager.current_index is None:
             self.play_index(0)
             return
 
 
         attempts = 0  
-        previous_index = (self.table.current_index - 1) % len(self.playlist)
+        previous_index = (self.playlistManager.current_index - 1) % len(self.playlistManager.playlist)
         attempts = 0  
 
-        while attempts < len(self.playlist):
-            if self.playlist[previous_index].unavailable:
-                previous_index = (previous_index - 1) % len(self.playlist)
+        while attempts < len(self.playlistManager.playlist):
+            if self.playlistManager.playlist[previous_index].unavailable:
+                previous_index = (previous_index - 1) % len(self.playlistManager.playlist)
                 attempts += 1
                 continue
             break
@@ -1028,46 +975,45 @@ class PlayerWindow(SkinManager,AudioController):
 
     def remove_selected(self) -> None:
         row = self.table.currentRow()
-        if row < 0 or row >= len(self.playlist):
+        if row < 0 or row >= len(self.playlistManager.playlist):
             return
 
-        del self.playlist[row]
+        del self.playlistManager.playlist[row]
         self.table.removeRow(row)
 
-        if self.table.current_index == row:
+        if self.playlistManager.current_index == row:
             self.stop_playback()
-            self.table.current_index = None
-        elif self.table.current_index is not None and row < self.table.current_index:
-            self.table.current_index -= 1
+            self.playlistManager.current_index = None
+        elif self.playlistManager.current_index is not None and row < self.playlistManager.current_index:
+            self.playlistManager.current_index -= 1
         self.refresh_table()
 
     def remove_index(self,index:int) -> None:
-        if index < 0 or index >= len(self.playlist):
+        if index < 0 or index >= len(self.playlistManager.playlist):
             return
 
-        del self.playlist[index]
+        del self.playlistManager.playlist[index]
         self.table.removeRow(index)
 
-        if self.table.current_index == index:
+        if self.playlistManager.current_index == index:
             self.stop_playback()
-            self.table.current_index = None
-        elif self.table.current_index is not None and index < self.table.current_index:
-            self.table.current_index -= 1
+            self.playlistManager.current_index = None
+        elif self.playlistManager.current_index is not None and index < self.playlistManager.current_index:
+            self.playlistManager.current_index -= 1
         self.refresh_table()
 
     def clear_playlist(self) -> None:
         self.stop_playback()
-        self.playlist.clear()
-        self.table.current_index = None
-        self.table.clearPlaylistView()
+
+        self.playlistManager.clear_playlist()
+
         self.position_slider.setRange(0, 0)
-        self.playlist_title = "MSMP6 Playlist"
         self.set_metaData(
             time_possition="0:00",
             time_end="0:00",
-            track_title="No track",
-            artist="Unknown artist",
-            album="Unknown album"
+            track_title="",
+            artist="",
+            album=""
             )
         self.set_cover_placeholder()
 
@@ -1075,7 +1021,7 @@ class PlayerWindow(SkinManager,AudioController):
             self.position_slider.set_waveform([])
 
         self.update_buffer_progress(0.0)
-        self.status_label.setText("Playlist cleared")
+        self.update_status_bar("Playlist cleared")
         self.emit_mpris_properties_changed("org.mpris.MediaPlayer2.Player", {
             "Metadata": self.mpris_metadata(),
             "CanGoNext": False,
@@ -1086,15 +1032,15 @@ class PlayerWindow(SkinManager,AudioController):
     def move_selected(self, direction: int) -> None:
         row = self.table.currentRow()
         target = row + direction
-        if row < 0 or target < 0 or target >= len(self.playlist):
+        if row < 0 or target < 0 or target >= len(self.playlistManager.playlist):
             return
 
-        self.playlist[row], self.playlist[target] = self.playlist[target], self.playlist[row]
+        self.playlistManager.playlist[row], self.playlistManager.playlist[target] = self.playlistManager.playlist[target], self.playlistManager.playlist[row]
 
-        if self.table.current_index == row:
-            self.table.current_index = target
-        elif self.table.current_index == target:
-            self.table.current_index = row
+        if self.playlistManager.current_index == row:
+            self.playlistManager.current_index = target
+        elif self.playlistManager.current_index == target:
+            self.playlistManager.current_index = row
 
         self.refresh_table()
         self.table.selectRow(target)
@@ -1103,23 +1049,18 @@ class PlayerWindow(SkinManager,AudioController):
         path, _filter = QFileDialog.getSaveFileName(
             self,
             "Save playlist",
-            os.path.join(LocalSaveDir(),"MyPlaylists",f"{self.playlist_title}.plmsmpsbox"),
+            os.path.join(LocalSaveDir(),"MyPlaylists",f"{self.playlistManager.playlist_title}.plmsmpsbox"),
             "MSMP playlist (*.plmsmpsbox);;JSON playlists (*.json)"
         )
         if not path:
             return
 
-        data = self.to_msmp_playlist()
         try:
-            with open(path, "w", encoding="utf-8") as file:
-                json.dump(data, file, ensure_ascii=False, indent=2)
-            self.status_label.setText(f"Playlist saved: {path}")
-            self.events.on_playlist_saved.emit(path,self.playlist)
+            self.playlistManager.save_playlist(path)
         except OSError as exc:
             QMessageBox.warning(self, "Save failed", str(exc))
 
     def load_playlist(self,path=None,isautosave=False) -> None:
-
         if not(self.ui.get("playlist_table")):
             return
 
@@ -1134,65 +1075,28 @@ class PlayerWindow(SkinManager,AudioController):
                 return
 
         try:
-            with open(path, "r", encoding="utf-8") as file:
-                data = json.load(file)
+            self.playlistManager.load_playlist(path,isautosave)
 
             self.stop_playback()
-            self.table.current_index = None
-            self.playlist = load_playlist_data(data)
 
-            self.playlist_title = str(data.get("title") or "MSMP5 Playlist")
-
-            self.playlist_image_url = str(
-                data.get("ImgUrl")
-                or data.get("img_url")
-                or "https://msmp.maxsspeaker.space/static/img/Missing.png"
-            )
-
-            self.refresh_table()
-            self.status_label.setText(f"Playlist loaded: {path}")
+            self.update_status_bar(f"Playlist loaded: {path}")
             self.emit_mpris_properties_changed("org.mpris.MediaPlayer2.Player", {
                 "Metadata": self.mpris_metadata(),
-                "CanGoNext": bool(self.playlist),
-                "CanGoPrevious": bool(self.playlist),
-                "CanPlay": bool(self.playlist),
+                "CanGoNext": bool(self.playlistManager.playlist),
+                "CanGoPrevious": bool(self.playlistManager.playlist),
+                "CanPlay": bool(self.playlistManager.playlist),
             })
-            if(isautosave):
-                QTimer.singleShot(0, lambda: self.table.verticalScrollBar().setValue(data["ScrollBarState"]))
-            else:
-                QTimer.singleShot(0, lambda: self.table.verticalScrollBar().setValue(0))
-            self.events.on_playlist_opened.emit(path,self.playlist)
 
         except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
             QMessageBox.warning(self, "Load failed", str(exc))
 
-    def to_msmp_playlist(self) -> dict:
-        return {
-            "title": self.playlist_title,
-            "ImgUrl": self.playlist_image_url,
-            "playlist": [self.to_msmp_track(item) for item in self.playlist],
-        }
 
-    @staticmethod
-    def to_msmp_track(item: PlaylistItem) -> dict:
-        return {
-            "ID": item.source_id,
-            "name": item.title,
-            "uploader": item.uploader,
-            "album": item.album,
-            "artwork_url": item.artwork_url,
-            "duration": item.duration,
-            "url": item.page_url,
-            "Publis": item.publis,
-            "Unavailable": item.unavailable,
-            "load_error": item.load_error,
-        }
 
     def update_current_metadata(self, item: PlaylistItem) -> None:
         self.set_metaData(
             track_title=item.title or "No track",
             artist=item.uploader or "Unknown artist",
-            album=item.album or self.playlist_title or "Unknown album"
+            album=item.album or self.playlistManager.playlist_title or "Unknown album"
             )
         self.events.on_update_current_metadata.emit(item)
 
@@ -1200,8 +1104,6 @@ class PlayerWindow(SkinManager,AudioController):
 
         if item.artwork_url:
             self.network.get(QNetworkRequest(QUrl(item.artwork_url)))
-
-    
 
     def on_artwork_loaded(self, reply) -> None:
         data = reply.readAll()
@@ -1230,11 +1132,11 @@ class PlayerWindow(SkinManager,AudioController):
         reply.deleteLater()
 
     def toggle_play_mode(self) -> None:
-        self.play_mode_index = (self.play_mode_index + 1) % len(self.PLAY_MODES)
-        self.mode_button.setIcon(QIcon(self.PLAY_MODES_icons[self.play_mode_index]))
+        self.playlistManager.play_mode_index = (self.playlistManager.play_mode_index + 1) % len(self.PLAY_MODES)
+        self.mode_button.setIcon(QIcon(self.PLAY_MODES_icons[self.playlistManager.play_mode_index]))
         self.emit_mpris_properties_changed("org.mpris.MediaPlayer2.Player", {
             "LoopStatus": self.current_mpris_loop_status(),
-            "Shuffle": self.PLAY_MODES[self.play_mode_index] == "Rnd",
+            "Shuffle": self.PLAY_MODES[self.playlistManager.play_mode_index] == "Rnd",
         })
 
     def setup_mpris(self) -> None:
@@ -1248,7 +1150,7 @@ class PlayerWindow(SkinManager,AudioController):
         bridge.quit_requested.connect(self.close)
         bridge.seek_requested.connect(self.seek_relative)
         bridge.set_position_requested.connect(self.set_player_position)
-        bridge.open_uri_requested.connect(lambda uri: self.add_url_value(uri, auto_play=True))
+        bridge.open_uri_requested.connect(lambda uri: self.playlistManager.add_url_value(uri, auto_play=True))
         bridge.loop_status_requested.connect(self.set_loop_status_from_mpris)
         bridge.shuffle_requested.connect(self.set_shuffle_from_mpris)
         bridge.volume_requested.connect(self.set_volume_from_mpris)
@@ -1313,7 +1215,7 @@ class PlayerWindow(SkinManager,AudioController):
             self.mpris_position_timer.stop()
 
     def sync_mpris_position(self, position_ms: Optional[int] = None) -> None:
-        if self.table.current_index is None:
+        if self.playlistManager.current_index is None:
             return
 
         if position_ms is None:
@@ -1330,13 +1232,13 @@ class PlayerWindow(SkinManager,AudioController):
         modes = {"None": "Seq", "Track": "One", "Playlist": "All"}
         target = modes.get(value)
         if target and target in self.PLAY_MODES:
-            self.play_mode_index = self.PLAY_MODES.index(target)
+            self.playlistManager.play_mode_index = self.PLAY_MODES.index(target)
             self.mode_button.setIcon(QIcon(self.PLAY_MODES_icons[target]))
             self.update_mpris_player_properties({"LoopStatus": value})
 
     def set_shuffle_from_mpris(self, value: bool) -> None:
         target = "Rnd" if value else "Seq"
-        self.play_mode_index = self.PLAY_MODES.index(target)
+        self.playlistManager.play_mode_index = self.PLAY_MODES.index(target)
         self.mode_button.setText(target)
         self.update_mpris_player_properties({
             "Shuffle": bool(value),
@@ -1352,7 +1254,7 @@ class PlayerWindow(SkinManager,AudioController):
         self.update_mpris_player_properties({"Volume": volume})
 
     def current_mpris_loop_status(self) -> str:
-        mode = self.PLAY_MODES[self.play_mode_index]
+        mode = self.PLAY_MODES[self.playlistManager.play_mode_index]
         if mode == "One":
             return "Track"
         if mode == "All":
@@ -1362,17 +1264,17 @@ class PlayerWindow(SkinManager,AudioController):
     def mpris_metadata(self) -> dict:
         item = None
         if(self.ui.get("playlist_table")):
-            if self.table.current_index is not None and 0 <= self.table.current_index < len(self.playlist):
-                item = self.playlist[self.table.current_index]
+            if self.playlistManager.current_index is not None and 0 <= self.playlistManager.current_index < len(self.playlistManager.playlist):
+                item = self.playlistManager.playlist[self.playlistManager.current_index]
 
         if item is None:
             return MprisServer.empty_metadata()
 
         metadata = {
-            "mpris:trackid": Variant("o", f"/org/mpris/MediaPlayer2/Track/{self.table.current_index}"),
+            "mpris:trackid": Variant("o", f"/org/mpris/MediaPlayer2/Track/{self.playlistManager.current_index}"),
             "xesam:title": Variant("s", item.title or "Unknown track"),
             "xesam:artist": Variant("as", [item.uploader] if item.uploader else []),
-            "xesam:album": Variant("s", item.album or self.playlist_title or ""),
+            "xesam:album": Variant("s", item.album or self.playlistManager.playlist_title or ""),
             "xesam:url": Variant("s", item.page_url),
         }
         if item.duration:
@@ -1382,19 +1284,19 @@ class PlayerWindow(SkinManager,AudioController):
         return metadata
 
     def next_index_after_current(self) -> Optional[int]:
-        if self.table.current_index is None or not self.playlist:
+        if self.playlistManager.current_index is None or not self.playlistManager.playlist:
             return None
 
-        mode = self.PLAY_MODES[self.play_mode_index]
+        mode = self.PLAY_MODES[self.playlistManager.play_mode_index]
         if mode == "One":
-            return self.table.current_index
+            return self.playlistManager.current_index
         if mode == "Rnd":
-            return random.randrange(len(self.playlist))
+            return random.randrange(len(self.playlistManager.playlist))
 
-        next_index = self.table.current_index + 1
+        next_index = self.playlistManager.current_index + 1
         while True:
-            if next_index < len(self.playlist):
-                if (self.playlist[next_index].unavailable):
+            if next_index < len(self.playlistManager.playlist):
+                if (self.playlistManager.playlist[next_index].unavailable):
                     next_index = next_index + 1
                     continue
                 return next_index
@@ -1425,8 +1327,8 @@ class PlayerWindow(SkinManager,AudioController):
             self.stop_buffer_progress_monitor()
             self.update_buffer_progress(0.0)
 
-        if self.table.current_index is not None and status in ready_states:
-            self.request_waveform_generation(self.table.current_index)
+        if self.playlistManager.current_index is not None and status in ready_states:
+            self.request_waveform_generation(self.playlistManager.current_index)
 
         if status != QMediaPlayer.EndOfMedia:
             return
@@ -1438,21 +1340,21 @@ class PlayerWindow(SkinManager,AudioController):
             self.set_mpris_playback_status("Stopped")
 
     def restart_current_stream(self) -> None:
-        if self.table.current_index is None:
+        if self.playlistManager.current_index is None:
             return
 
         self.pending_position = self.player.position()
         self.update_buffer_progress(0.0)
-        self.playlist[self.table.current_index].stream_url = ""
-        self.status_label.setText("Restarting stream...")
-        self.resolve_item(self.table.current_index, auto_play=True)
+        self.playlistManager.playlist[self.playlistManager.current_index].stream_url = ""
+        self.update_status_bar("Restarting stream...")
+        self.resolve_item(self.playlistManager.current_index, auto_play=True)
 
     def on_player_error(self, _error, error_string: str) -> None:
-        if self.table.current_index is None:
+        if self.playlistManager.current_index is None:
             return
 
         if self.restart_attempts >= self.MAX_RESTARTS:
-            self.status_label.setText(f"Playback failed: {error_string}")
+            self.update_status_bar(f"Playback failed: {error_string}")
             self.set_mpris_playback_status("Stopped")
 
             #QMessageBox.warning(self, "Playback error", error_string)
@@ -1464,8 +1366,8 @@ class PlayerWindow(SkinManager,AudioController):
         self.status_label.setText(
             f"Stream error, restarting ({self.restart_attempts}/{self.MAX_RESTARTS})..."
         )
-        self.playlist[self.table.current_index].stream_url = ""
-        failed_index = self.table.current_index
+        self.playlistManager.playlist[self.playlistManager.current_index].stream_url = ""
+        failed_index = self.playlistManager.current_index
         QTimer.singleShot(500, lambda: self.resolve_item(failed_index, auto_play=True))
 
     def on_playback_state_changed(self, state: QMediaPlayer.PlaybackState) -> None:
@@ -1501,8 +1403,8 @@ class PlayerWindow(SkinManager,AudioController):
         if(progress==0.25):
             return
         self.position_slider.set_buffered_ratio(progress)
-        if self.table.current_index is not None and progress >= 0.99:
-            self.request_waveform_generation(self.table.current_index)
+        if self.playlistManager.current_index is not None and progress >= 0.99:
+            self.request_waveform_generation(self.playlistManager.current_index)
 
     def start_buffer_progress_monitor(self) -> None:
         if not self.buffer_progress_timer.isActive():
@@ -1523,16 +1425,16 @@ class PlayerWindow(SkinManager,AudioController):
         if not isinstance(self.position_slider, WaveformSeekBar):
             return
 
-        if index < 0 or index >= len(self.playlist):
+        if index < 0 or index >= len(self.playlistManager.playlist):
             return
 
-        item = self.playlist[index]
+        item = self.playlistManager.playlist[index]
         if item.waveform_ready or item.page_url in self.waveform_cache:
             cached = self.waveform_cache.get(item.page_url)
             if cached and not item.waveform:
                 item.waveform = cached
                 item.waveform_ready = True
-                if index == self.table.current_index:
+                if index == self.playlistManager.current_index:
                     self.position_slider.set_waveform(cached)
             return
 
@@ -1558,16 +1460,16 @@ class PlayerWindow(SkinManager,AudioController):
         self.waveform_generation_indexes.discard(index)
         if not isinstance(waveform, list):
             return
-        if index < 0 or index >= len(self.playlist):
+        if index < 0 or index >= len(self.playlistManager.playlist):
             return
 
-        item = self.playlist[index]
+        item = self.playlistManager.playlist[index]
         cleaned = [min(1.0, max(0.0, float(level))) for level in waveform]
         item.waveform = cleaned
         item.waveform_ready = True
         self.waveform_cache[item.page_url] = cleaned
 
-        if index == self.table.current_index:
+        if index == self.playlistManager.current_index:
             self.position_slider.set_waveform(cleaned)
 
     def on_waveform_failed(self, index: int, error: str) -> None:
@@ -1704,13 +1606,7 @@ class PlayerWindow(SkinManager,AudioController):
 
         self.events.on_app_closing.emit()
 
-        data = self.to_msmp_playlist()
-        data["ScrollBarState"]=self.table.verticalScrollBar().value()
-        try:
-            with open(os.path.join(LocalSaveDir(),"autosave.plmsmpsbox"), "w", encoding="utf-8") as file:
-                json.dump(data, file, ensure_ascii=False, indent=2)
-        except OSError as exc:
-            print(exc)
+        self.playlistManager.autosave()
 
         self.mpris_server.stop()
         super().closeEvent(event)
@@ -1809,7 +1705,7 @@ def main() -> int:
     install_exception_hooks()
 
     #sys.excepthook
-    window = PlayerWindow(args.skin)
+    window = PlayerWindow(args)
     if args.fullscreen:
         window.showFullScreen()
     else:

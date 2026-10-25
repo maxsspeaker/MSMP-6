@@ -806,7 +806,7 @@ class SkinManager(QMainWindow):
         self.set_cover_placeholder()
 
 
-        self.mode_button.setIcon(QIcon(self.PLAY_MODES_icons[self.play_mode_index]))
+        self.mode_button.setIcon(QIcon(self.PLAY_MODES_icons[self.playlistManager.play_mode_index]))
 
         # ── Дополнительный connect для url_input (returnPressed) ──────────
         if(self.ui.get("url_input")):
@@ -831,7 +831,7 @@ class SkinManager(QMainWindow):
 
         self.table = self.ui.get("playlist_table")
         if(self.table):
-            self.table.playlist = self.playlist
+            self.playlistManager.link_playlistWidget_to_manager(self.table)
             self.table.setColumnCount(2)
             self.table.setHorizontalHeaderLabels(["Track", "Length"])
             self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
@@ -875,6 +875,12 @@ class SkinManager(QMainWindow):
             self.player.bufferProgressChanged.connect(self.on_buffer_progress_changed)
         except AttributeError:
             pass
+
+    def update_status_bar(self,status):
+        status_label=self.ui.get("status_label")
+
+        if(status_label):
+            status_label.setText(status)
 
     def _setup_MainMenuBar(self):
         file_menu = self.MainMenuBar.add_menu("Menu")

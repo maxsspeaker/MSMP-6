@@ -289,6 +289,162 @@ class OverlaySelectionDelegate(QStyledItemDelegate):
         style = widget.style() if widget else QApplication.style()
         style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, widget)
 
+class PlaylistManager():
+    def __init__(self,main_window):
+        self.main_window=main_window
+
+        self.playlist: list[PlaylistItem] = []
+        self.resolve_autoplay = None
+        self.play_mode_index = 0
+        self.playlist_title = "MSMP6 Playlist"
+        self.playlist_image_url = "https://msmp.maxsspeaker.space/static/img/Missing.png"
+        self.current_index = 0
+        self.playlist: list[PlaylistItem] = []
+
+        self.table=None
+
+    def link_playlistWidget_to_manager(self,table):
+        self.table=table
+
+        self.table.playlistManager=self
+        self.refresh_table()
+
+    def to_msmp_playlist(self) -> dict:
+        return {
+            "title": self.playlist_title,
+            "ImgUrl": self.playlist_image_url,
+            "playlist": [self.to_msmp_track(item) for item in self.playlist],
+        }
+
+    def save_playlist(self,path):
+        data = self.to_msmp_playlist()
+        with open(path, "w", encoding="utf-8") as file:
+            json.dump(data, file, ensure_ascii=False, indent=2)
+        self.main_window.update_status_bar(f"Playlist saved: {path}")
+        self.main_window.events.on_playlist_saved.emit(path,self.playlist)
+
+
+    def load_playlist(self,path=None,isautosave=False) -> None:
+        with open(path, "r", encoding="utf-8") as file:
+            data = json.load(file)
+
+        self.current_index = None
+        self.playlist = load_playlist_data(data)
+
+        self.playlist_title = str(data.get("title") or "MSMP5 Playlist")
+
+        self.playlist_image_url = str(
+            data.get("ImgUrl")
+            or data.get("img_url")
+            or "https://msmp.maxsspeaker.space/static/img/Missing.png"
+        )
+
+        self.refresh_table()
+        if(self.table):
+            if(isautosave):
+                QTimer.singleShot(0, lambda: self.table.verticalScrollBar().setValue(data["ScrollBarState"]))
+            else:
+                QTimer.singleShot(0, lambda: self.table.verticalScrollBar().setValue(0))
+
+        self.main_window.events.on_playlist_opened.emit(path,self.playlist)
+
+    def refresh_table(self) -> None:
+        if(self.table):
+            self.table.clearPlaylistView()
+            self.table.setPlaylist(self.playlist)
+
+    @staticmethod
+    def to_msmp_track(item: PlaylistItem) -> dict:
+        return {
+            "ID": item.source_id,
+            "name": item.title,
+            "uploader": item.uploader,
+            "album": item.album,
+            "artwork_url": item.artwork_url,
+            "duration": item.duration,
+            "url": item.page_url,
+            "Publis": item.publis,
+            "Unavailable": item.unavailable,
+            "load_error": item.load_error,
+        }
+
+    def autosave(self):
+        data = self.to_msmp_playlist()
+        if(self.table):
+            data["ScrollBarState"]=self.table.verticalScrollBar().value()
+        else:
+            data["ScrollBarState"]=0
+
+        try:
+            with open(os.path.join(LocalSaveDir(),"autosave.plmsmpsbox"), "w", encoding="utf-8") as file:
+                json.dump(data, file, ensure_ascii=False, indent=2)
+        except OSError as exc:
+            print(exc)
+
+
+    def add_url_value(self, url: str, auto_play: bool = False,source_id="youtube",type="audio") -> None:
+        row = len(self.playlist)
+        self.playlist.append(PlaylistItem(page_url=url,source_id=source_id))
+        if(self.table):
+            self.table.insertRow(row)
+            self.table.update_row(row, self.playlist[row])
+        self.main_window.update_status_bar("Resolving stream...")
+        self.main_window.emit_mpris_properties_changed("org.mpris.MediaPlayer2.Player", {
+            "CanGoNext": bool(self.playlist),
+            "CanGoPrevious": bool(self.playlist),
+            "CanPlay": bool(self.playlist),
+        })
+        self.resolve_item(row, auto_play=auto_play,type=type)
+
+
+    def resolve_item(self, index: int, auto_play: bool = False,type="audio") -> None:
+        if index < 0 or index >= len(self.playlist):
+            return
+
+        if(auto_play):
+            self.resolve_autoplay = index
+
+        if(self.table):
+            if self.main_window.resolverManager.resolving_indexes.get(self.table.link_dynamic_item(index)):
+                return
+        else:
+            if self.main_window.resolverManager.resolving_indexes.get(index):
+                return
+
+        if(type=="audio" or type=="video"):
+            local_audio=self.main_window.fpodManager.get_local_audio(self.playlist[index])
+            if(local_audio):
+                self.playlist[index].stream_url=local_audio
+                if(auto_play):
+                    self.main_window.start_playback(index)
+                return
+
+
+        if(self.table):
+            self.table.setItemLoading(index,True)
+            link_index=self.table.link_dynamic_item(index)
+        else:
+            link_index=index
+
+
+        self.main_window.resolverManager.addTask(link_index,self.main_window.plugin_loader.find_resolver(
+            link_index,
+            self.playlist[index],
+            self.main_window.resolve_signals,
+            self.main_window.config["cookies"]["browser"],
+            proxy=self.main_window.proxy.get(),
+            type=type
+        ))
+
+    def clear_playlist(self) -> None:
+        self.playlist.clear()
+        self.current_index = None
+        self.playlist_title = "MSMP6 Playlist"
+
+        if(self.table):
+            self.table.clearPlaylistView()
+
+
 class PlaylistWidget(QTableWidget):
     """Кастомная таблица с поддержкой блокировки строк"""
     def __init__(self, rows=None, cols=None, parent=None,rowHeight:int = 44,inlineAudio: bool = False):
@@ -301,6 +457,8 @@ class PlaylistWidget(QTableWidget):
         self._mem_to_safe_id = {} # id памяти -> безопасный маленький ID
         self._item_row_map = {}
 
+        self.playlistManager = None
+
         self.inlineAudio=inlineAudio # 12
         self.DefalutRowHeight=rowHeight #44
 
@@ -308,7 +466,6 @@ class PlaylistWidget(QTableWidget):
         self.horizontalScrollBar().valueChanged.connect(self.update_overlays_position)
 
         self.playlist = []
-        self.current_index: Optional[int] = None
 
         self._treak_color_is_current = QColor(palette.color(QPalette.ColorRole.HighlightedText))
         self._treak_color_unavailable = palette.color(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text) # "#5f6368"
@@ -399,8 +556,8 @@ class PlaylistWidget(QTableWidget):
             self.insertRow(row)
             self.update_row(row, item)
 
-        if self.current_index is not None and self.current_index < len(self.playlist):
-            self.selectRow(self.current_index)
+        if self.playlistManager.current_index is not None and self.playlistManager.current_index < len(self.playlist):
+            self.selectRow(self.playlistManager.current_index)
 
     def mouseDoubleClickEvent(self, event):
         # Получаем элемент под курсором
@@ -444,7 +601,7 @@ class PlaylistWidget(QTableWidget):
             return
 
         item = self.playlist[row]
-        is_current = row == self.current_index
+        is_current = row == self.playlistManager.current_index
         if is_current:
             background = QBrush(self._treak_bg_is_current)
         elif item.unavailable:
@@ -608,8 +765,8 @@ class PlaylistWidget(QTableWidget):
                 return old_row + 1
             return old_row
 
-        if self.current_index is not None:
-            self.current_index = remap(self.current_index)
+        if self.playlistManager.current_index is not None:
+            self.playlistManager.current_index = remap(self.playlistManager.current_index)
 
         if self.overlays:
             self.overlays = {remap(row): ov for row, ov in self.overlays.items()}
@@ -669,11 +826,11 @@ class PlaylistWidget(QTableWidget):
             self._item_row_map[item_key] = r
 
         # 6. Корректируем индекс текущего воспроизводимого трека
-        if self.current_index is not None:
-            if self.current_index == row:
-                self.current_index = None  # Воспроизводимый трек был удален
-            elif self.current_index > row:
-                self.current_index -= 1  # Трек сдвинулся выше
+        if self.playlistManager.current_index is not None:
+            if self.playlistManager.current_index == row:
+                self.playlistManager.current_index = None  # Воспроизводимый трек был удален
+            elif self.playlistManager.current_index > row:
+                self.playlistManager.current_index -= 1  # Трек сдвинулся выше
 
         # 7. Пересчитываем визуальное положение оставшихся оверлеев
         self.update_overlays_position()
