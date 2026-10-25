@@ -956,7 +956,7 @@ class FixedComboBox(QComboBox):
 
 class SystemMenuBar(QWidget):
     
-    def __init__(self, parent=None, bg_color="rgba(40, 40, 40, 255)"):
+    def __init__(self, parent=None, bg_color="rgba(40, 40, 40, 255)",headless=False):
         super().__init__(parent)
         self.setObjectName("MainMenuBar")
         

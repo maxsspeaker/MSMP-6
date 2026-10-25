@@ -82,11 +82,12 @@ from PySide6.QtWidgets import (
     QScroller, 
     QScrollerProperties,
     QAbstractItemView,
-    QToolTip
+    QToolTip,QMenu
 )
 from PySide6.QtCore import Qt, QSize,QTimer,Signal,QEasingCurve
 from PySide6.QtGui import QIcon,QBrush, QColor, QLinearGradient, QPainter, QPixmap,QAction
 
+from modules.other import SystemMenuBar
 from modules.AboutWindow import AboutWindow
 
 
@@ -739,7 +740,13 @@ UIEngine.register("waveformSeekBar",  WaveformSeekBar)
 
 class SkinManager(QMainWindow):
 
-    def _init_ui(self): 
+    def _init_ui(self,headless=False): 
+
+        if(headless):
+            self.MainMenuBar=SystemMenuBar()
+            self._setup_MainMenuBar()
+            return
+
         _ui_xml_path = os.path.join(os.path.dirname(sys.modules['__main__'].__file__), f"skins/{self.config["skin"]}")
 
         self._engine = UIEngine(context=self, default_spacing=0, default_margin=0)
@@ -909,8 +916,6 @@ class SkinManager(QMainWindow):
         if not hasattr(self, "PluginMenu"):
             self.PluginMenu=self.MainMenuBar.add_submenu(setup_menu, "Plugins")
             self.PluginMenu.setParent(self, self.PluginMenu.windowFlags())
-
-            self.PlguinMenu=self.PluginMenu #!!! legacy БУДЕТ УБРАНО В 6.1.1 исправьте кастомные скины!!!
         else:
             setup_menu.addMenu(self.PluginMenu)
 

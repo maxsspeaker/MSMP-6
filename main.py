@@ -514,6 +514,8 @@ class PlayerWindow(SkinManager,AudioController):
         self.setWindowTitle("MSMP FoxWave")
         self.resize(820, 760)
 
+        self.headless=args.headless
+
         if (sys.platform == "win32"):
             self.setWindowIcon(QIcon("resources/MSMPwave.png"))
         else:
@@ -586,7 +588,7 @@ class PlayerWindow(SkinManager,AudioController):
 
         self.airFoxManager=utils.AirFoxManager(self)
 
-        self._init_ui()
+        self._init_ui(args.headless)##args.headless
 
         self.player.positionChanged.connect(self.on_position_changed)
         self.player.durationChanged.connect(self.on_duration_changed)
@@ -610,7 +612,14 @@ class PlayerWindow(SkinManager,AudioController):
 
 
         if(os.path.isfile(os.path.join(LocalSaveDir(),"autosave.plmsmpsbox"))):
-            self.load_playlist(path=os.path.join(LocalSaveDir(),"autosave.plmsmpsbox"),isautosave=True)
+            self.load_playlist(path=os.path.join(LocalSaveDir(),"autosave.plmsmpsbox"),isautosave=True,headless=args.headless)
+
+        if(args.headless):
+            self.playlistManager.load_playlist(path=os.path.join(LocalSaveDir(),"autosave.plmsmpsbox"),isautosave=True)
+
+        if(args.autoplay):
+            QTimer.singleShot(50, lambda: self.play_index(args.autoplay))
+            
         self.events.on_app_loading_finished.emit()
 
 
@@ -733,7 +742,8 @@ class PlayerWindow(SkinManager,AudioController):
 
     def on_resolved(self, index: int, item: PlaylistItem) -> None:
         self.resolverManager.resolving_indexes.pop(index,None)
-        index=self.table.get_dynamic_item(index)
+        if(self.playlistManager.table):
+            index=self.table.get_dynamic_item(index)
         if index is None:
             return
         auto_play = self.playlistManager.resolve_autoplay
@@ -749,8 +759,9 @@ class PlayerWindow(SkinManager,AudioController):
             item.waveform_ready = True
 
         self.playlistManager.playlist[index] = item
-        self.table.setItemLoading(index,False)
-        self.table.update_row(index, item)
+        if(self.playlistManager.table):
+            self.table.setItemLoading(index,False)
+            self.table.update_row(index, item)
         self.update_status_bar(f"Resolved: {item.title}")
 
         if self.playlistManager.current_index == index:
@@ -818,7 +829,10 @@ class PlayerWindow(SkinManager,AudioController):
         self.table.setPlaylist(self.playlistManager.playlist)
 
     def play_selected_or_current(self) -> None:
-        selected = self.table.currentRow()
+        if(self.playlistManager.table):
+            selected = self.table.currentRow()
+        else:
+            selected = self.playlistManager.current_index
 
         if self.playlistManager.current_index is not None and self.player.playbackState() == QMediaPlayer.PausedState:
             self.player.play()
@@ -891,17 +905,19 @@ class PlayerWindow(SkinManager,AudioController):
         item = self.playlistManager.playlist[index]
         previous_index = self.playlistManager.current_index
         self.playlistManager.current_index = index
-        self.table.selectRow(index)
-        self.refresh_row_style(previous_index)
-        self.refresh_row_style(index)
+        if(self.playlistManager.table):
+            self.table.selectRow(index)
+            self.refresh_row_style(previous_index)
+            self.refresh_row_style(index)
         self.update_current_metadata(item)
         
         self.playlistManager.resolve_autoplay=None
 
         self._last_mpris_position_us = -1
-        if isinstance(self.position_slider, WaveformSeekBar):
-            self.position_slider.set_waveform(item.waveform)
-        self.update_buffer_progress(0.0)
+        if(self.ui.get("position_slider")):
+            if isinstance(self.ui["position_slider"], WaveformSeekBar):
+                self.ui["position_slider"].set_waveform(item.waveform)
+            self.update_buffer_progress(0.0)
         self.player.setSource(QUrl(item.stream_url))
         self.player.play()
 
@@ -1060,9 +1076,10 @@ class PlayerWindow(SkinManager,AudioController):
         except OSError as exc:
             QMessageBox.warning(self, "Save failed", str(exc))
 
-    def load_playlist(self,path=None,isautosave=False) -> None:
-        if not(self.ui.get("playlist_table")):
-            return
+    def load_playlist(self,path=None,isautosave=False,headless=False) -> None:
+        if not(headless):
+            if not(self.ui.get("playlist_table")):
+                return
 
         if not(path):
             path, _filter = QFileDialog.getOpenFileName(
@@ -1248,10 +1265,12 @@ class PlayerWindow(SkinManager,AudioController):
     def set_volume_from_mpris(self, value: float) -> None:
         volume = min(1.0, max(0.0, float(value)))
         self.audio_output.setVolume(volume)
+        self.update_mpris_player_properties({"Volume": volume})
+        if not(self.ui.get("volume_slider")):
+            return
         self.volume_slider.blockSignals(True)
         self.volume_slider.setValue(round(volume * 100))
         self.volume_slider.blockSignals(False)
-        self.update_mpris_player_properties({"Volume": volume})
 
     def current_mpris_loop_status(self) -> str:
         mode = self.PLAY_MODES[self.playlistManager.play_mode_index]
@@ -1263,9 +1282,8 @@ class PlayerWindow(SkinManager,AudioController):
 
     def mpris_metadata(self) -> dict:
         item = None
-        if(self.ui.get("playlist_table")):
-            if self.playlistManager.current_index is not None and 0 <= self.playlistManager.current_index < len(self.playlistManager.playlist):
-                item = self.playlistManager.playlist[self.playlistManager.current_index]
+        if self.playlistManager.current_index is not None and 0 <= self.playlistManager.current_index < len(self.playlistManager.playlist):
+            item = self.playlistManager.playlist[self.playlistManager.current_index]
 
         if item is None:
             return MprisServer.empty_metadata()
@@ -1396,6 +1414,9 @@ class PlayerWindow(SkinManager,AudioController):
             return 0.0
 
     def update_buffer_progress(self, progress: float) -> None:
+        if not(self.ui.get("position_slider")):
+            return
+
         if not isinstance(self.position_slider, WaveformSeekBar):
             return
             
@@ -1422,6 +1443,9 @@ class PlayerWindow(SkinManager,AudioController):
         self.update_buffer_progress(progress)
 
     def request_waveform_generation(self, index: int) -> None:
+        if not(self.ui.get("position_slider")):
+            return
+
         if not isinstance(self.position_slider, WaveformSeekBar):
             return
 
@@ -1559,17 +1583,22 @@ class PlayerWindow(SkinManager,AudioController):
         return 0.0
 
     def on_position_changed(self, position: int) -> None:
-        if not self.user_dragging:
-            self.position_slider.setValue(position)
         self.set_metaData(time_possition=self.format_time(position),time_end=self.format_time(self.player.duration()))
 
+        if not(self.ui.get("position_slider")):
+            return
+        if not self.user_dragging:
+            self.position_slider.setValue(position)
+
     def on_duration_changed(self, duration: int) -> None:
-        self.position_slider.setRange(0, max(0, duration))
-        self.set_metaData(time_possition=self.format_time(self.player.position()),time_end=self.format_time(duration))
         self.emit_mpris_properties_changed("org.mpris.MediaPlayer2.Player", {
             "Metadata": self.mpris_metadata(),
             "CanSeek": duration > 0,
         })
+        self.set_metaData(time_possition=self.format_time(self.player.position()),time_end=self.format_time(duration))
+
+        if (self.ui.get("position_slider")):
+            self.position_slider.setRange(0, max(0, duration))
 
     def on_seek_start(self) -> None:
         self.user_dragging = True
@@ -1685,10 +1714,22 @@ def main() -> int:
         help="Запустить приложение в полноэкранном режиме"
     )
     parser.add_argument(
+        '--headless', 
+        action='store_true', 
+        help="Запустить приложение без ui (experimental)"
+    )
+    parser.add_argument(
         '-s', '--skin', 
         type=str, 
         default="default",
         help="Установить скин из папки skins"
+    )
+
+    parser.add_argument(
+        '-p', '--autoplay', 
+        type=int, 
+        default=None,
+        help="Запустить аудио после запуска"
     )
     
     # Игнорируем аргументы, которые PySide6 забирает себе автоматически
@@ -1696,7 +1737,7 @@ def main() -> int:
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(message)s") #,filename="app.log",filemode="w",force=True 
 
-    app = QApplication(sys.argv)
+    app = QApplication(sys.argv +(["-platform", "offscreen"] if args.headless else []))
     if (sys.platform == "win32"):
         app.setStyle("Fusion")
 
