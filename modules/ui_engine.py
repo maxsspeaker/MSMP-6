@@ -1016,6 +1016,12 @@ class SkinManager(QMainWindow):
                     self.request_waveform_generation(self.playlistManager.current_index)
             self.position_slider.setRange(0, max(0, self.player.duration()))
             self.update_buffer_progress(0.0)
+
+        if (self.ui.get("volume_slider")):
+            self.volume_slider.blockSignals(True)
+            self.volume_slider.setValue(round(self.audio_output.volume() * 100))
+            self.volume_slider.blockSignals(False)
+
             
         self.events.on_skin_changed.emit(self.config["skin"])
 
