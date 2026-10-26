@@ -1366,7 +1366,7 @@ class PlayerWindow(SkinManager,AudioController):
         self.update_buffer_progress(0.0)
         self.playlistManager.playlist[self.playlistManager.current_index].stream_url = ""
         self.update_status_bar("Restarting stream...")
-        self.resolve_item(self.playlistManager.current_index, auto_play=True)
+        self.playlistManager.resolve_item(self.playlistManager.current_index, auto_play=True)
 
     def on_player_error(self, _error, error_string: str) -> None:
         if self.playlistManager.current_index is None:
@@ -1387,7 +1387,7 @@ class PlayerWindow(SkinManager,AudioController):
         )
         self.playlistManager.playlist[self.playlistManager.current_index].stream_url = ""
         failed_index = self.playlistManager.current_index
-        QTimer.singleShot(500, lambda: self.resolve_item(failed_index, auto_play=True))
+        QTimer.singleShot(500, lambda: self.playlistManager.resolve_item(failed_index, auto_play=True))
 
     def on_playback_state_changed(self, state: QMediaPlayer.PlaybackState) -> None:
         if state == QMediaPlayer.PlayingState:
