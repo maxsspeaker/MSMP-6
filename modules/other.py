@@ -270,9 +270,12 @@ class PlaylistManager():
         self.resolverManager.resolving_indexes.pop(index,None)
         if(self.table):
             index=self.table.get_dynamic_item(index)
+            resolve_autoplay=self.table.get_dynamic_item(self.resolve_autoplay)
+        else:
+            resolve_autoplay=self.resolve_autoplay
+
         if index is None:
             return
-        auto_play = self.resolve_autoplay
         if index < 0 or index >= len(self.playlist):
             return
 
@@ -290,12 +293,16 @@ class PlaylistManager():
             self.table.setItemLoading(index,False)
             self.table.update_row(index, item)
 
-        self.events.resolved.emit(index, item)
+        self.events.resolved.emit(index, item,resolve_autoplay)
 
 
     def on_resolve_failed(self,index: Optional[int],error: str,details: str = "") -> None:
         self.resolverManager.resolving_indexes.pop(index,None)
-        index=self.table.get_dynamic_item(index)
+        if(self.table):
+            index=self.table.get_dynamic_item(index)
+            resolve_autoplay=self.table.get_dynamic_item(self.resolve_autoplay)
+        else:
+            resolve_autoplay=self.resolve_autoplay
         if not(index==None):
             if(self.table):
                 self.table.setItemLoading(index,False)
@@ -312,8 +319,8 @@ class PlaylistManager():
             else:
                 title = "item"
 
-        console_details = details or message
         message = f"yt-dlp failed: {error}"
+        console_details = details or message
         print(console_details, file=sys.stderr, flush=True)
         logger.error("%s\n%s", message, console_details)
 
@@ -449,7 +456,10 @@ class PlaylistManager():
             return
 
         if(auto_play):
-            self.resolve_autoplay = index
+            if(self.table):
+                self.resolve_autoplay = self.table.link_dynamic_item(index)
+            else:
+                self.resolve_autoplay = index
 
         if(self.table):
             if self.resolverManager.resolving_indexes.get(self.table.link_dynamic_item(index)):
@@ -487,6 +497,7 @@ class PlaylistManager():
         self.playlist.clear()
         self.current_index = None
         self.playlist_title = "MSMP6 Playlist"
+        self.resolverManager.clear()
 
         if(self.table):
             self.table.clearPlaylistView()

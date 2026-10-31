@@ -45,7 +45,7 @@ class PlayerEvents(QObject):
 
 
 class PlaylistSignals(QObject):
-    resolved = Signal(object, object)
+    resolved = Signal(object, object,int)
     parsed = Signal(int, object, str)
     failed = Signal(object, str, str,bool)
     cleared = Signal()

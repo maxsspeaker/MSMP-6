@@ -712,14 +712,14 @@ class PlayerWindow(SkinManager,AudioController):
         if self.playlistManager.playlist:
             self.play_index(0)
 
-    def on_resolved(self, index: int, item: PlaylistItem) -> None:
+    def on_resolved(self, index: int, item: PlaylistItem,resolve_autoplay: int) -> None:
         self.update_status_bar(f"Resolved: {item.title}")
 
         if self.playlistManager.current_index == index:
             self.update_current_metadata(item)
 
-        if not self.playlistManager.resolve_autoplay == None:
-            if(self.playlistManager.resolve_autoplay==index):
+        if not resolve_autoplay == None:
+            if(resolve_autoplay==index):
                 self.start_playback(index)
 
     def on_resolve_failed(self,index: Optional[int],error: str,details: str = "",resolve_autoplay=False) -> None:
