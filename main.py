@@ -716,7 +716,7 @@ class PlayerWindow(SkinManager,AudioController):
         self.update_status_bar(f"Resolved: {item.title}")
 
         if self.playlistManager.current_index == index:
-            self.main_window.update_current_metadata(item) # to emit
+            self.update_current_metadata(item)
 
         if not self.playlistManager.resolve_autoplay == None:
             if(self.playlistManager.resolve_autoplay==index):
