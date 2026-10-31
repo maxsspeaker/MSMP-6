@@ -44,6 +44,14 @@ class PlayerEvents(QObject):
     on_app_closing = Signal()                  # Программа закрывается 
 
 
+class PlaylistSignals(QObject):
+    resolved = Signal(object, object)
+    parsed = Signal(int, object, str)
+    failed = Signal(object, str, str,bool)
+    cleared = Signal()
+
+
+
 class CustomAudioResolver:
     source: str
     ResolveTask: QRunnable

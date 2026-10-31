@@ -377,7 +377,7 @@ class WaveformTask(QRunnable):
             raise RuntimeError("track duration is unknown")
 
         CREATE_NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0) if sys.platform == "win32" else 0
-
+ 
         sample_rate = 22050
         chunk_samples = 2048
 
@@ -534,7 +534,7 @@ class PlayerWindow(SkinManager,AudioController):
 
         print(self.config)
         if not(args.skin=="default"):
-            self.config["skin"]=skin
+            self.config["skin"]=args.skin
 
         if (sys.platform == "linux"):
             os.environ["QT_AUDIO_BACKEND"] =  os.environ.get("QT_AUDIO_BACKEND",self.config.get("AUDIO_BACKEND","PulseAudio"))
@@ -542,7 +542,6 @@ class PlayerWindow(SkinManager,AudioController):
         self.plugin_loader = PluginLoader(self.config)
         self.plugin_loader.load_allowed(context=self)
 
-        self.playlistManager = PlaylistManager(self)
 
         self.pending_position = 0
         self.restart_attempts = 0
@@ -550,7 +549,6 @@ class PlayerWindow(SkinManager,AudioController):
         self.error_boxes: list[QMessageBox] = []
 
         self.ui={}
-
 
         self.mpris_server = MprisServer()
         self.mpris_playback_status = "Stopped"
@@ -560,19 +558,22 @@ class PlayerWindow(SkinManager,AudioController):
         self.mpris_position_timer.timeout.connect(self.sync_mpris_position)
 
         self.thread_pool = QThreadPool.globalInstance()
-        self.resolverManager = extractors.resolverControler(self.thread_pool)
-        
-        self.resolve_signals = extractors.ResolveSignals()
-        self.resolve_signals.resolved.connect(self.on_resolved)
-        self.resolve_signals.failed.connect(self.on_resolve_failed)
-        self.resolve_signals.status.connect(self.on_jam_playlist_status)
 
-        self.resolve_signals.parsed.connect(self.on_jam_playlist_parsed)
+        self.playlistManager = PlaylistManager(self,self.thread_pool)
+        
+        self.playlistManager.events.resolved.connect(self.on_resolved)
+        self.playlistManager.events.failed.connect(self.on_resolve_failed)
+        self.playlistManager.events.cleared.connect(self.on_playlist_cleared)
+        self.playlistManager._resolve_signals.status.connect(self.on_jam_playlist_status)
+
+        self.playlistManager.events.parsed.connect(self.on_jam_playlist_parsed)
 
         self._last_mpris_position_us = -1
 
         self.waveform_cache: dict[str, list[float]] = {}
         self.waveform_generation_indexes: set[int] = set()
+
+        self.playlistManager.waveform_cache=self.waveform_cache
 
         self.waveform_signals = WaveformSignals()
         self.waveform_signals.generated.connect(self.on_waveform_generated)
@@ -684,12 +685,7 @@ class PlayerWindow(SkinManager,AudioController):
 
         self.update_status_bar(status)
 
-    def on_jam_playlist_parsed(
-        self,
-        index: Optional[int],
-        items: object,
-        playlist_title: str,
-    ) -> None:
+    def on_jam_playlist_parsed(self,index: Optional[int],items: object,playlist_title: str,) -> None:
         if not isinstance(items, list) or not items:
             self.update_status_bar("Jam playlist is empty")
             return
@@ -699,15 +695,9 @@ class PlayerWindow(SkinManager,AudioController):
             self.update_status_bar("Jam playlist is empty")
             return
 
-        self.stop_playback()
-        self.playlistManager.playlist_title = playlist_title or "Jam playlist"
-        self.playlistManager.playlist = parsed_items
-        self.playlistManager.current_index = None
         self.pending_position = 0
         self.restart_attempts = 0
-        self.resolverManager.clear()
-        self.playlistManager.resolve_autoplay = None
-        self.refresh_table()
+
         self.emit_mpris_properties_changed("org.mpris.MediaPlayer2.Player", {
             "CanGoNext": bool(self.playlistManager.playlist),
             "CanGoPrevious": bool(self.playlistManager.playlist),
@@ -722,97 +712,30 @@ class PlayerWindow(SkinManager,AudioController):
         if self.playlistManager.playlist:
             self.play_index(0)
 
-    def on_jam_playlist_failed(self, index: int, error: str, details: str = "") -> None:
-        title = self.playlistManager.playlist[index].page_url if 0 <= index < len(self.playlistManager.playlist) else "item"
-        message = f"Jam parse failed for {title}: {error}"
-        self.update_status_bar(message)
-        console_details = details or message
-        print(console_details, file=sys.stderr, flush=True)
-        logging.error("%s\n%s", message, console_details)
-
-        box = QMessageBox(self)
-        box.setIcon(QMessageBox.Warning)
-        box.setWindowTitle("Jam parse error")
-        box.setText(error)
-        box.setInformativeText(title)
-        if details:
-            box.setDetailedText(details)
-        self.error_boxes.append(box)
-        box.finished.connect(lambda _result, item=box: self.release_error_box(item))
-        box.open()
-
     def on_resolved(self, index: int, item: PlaylistItem) -> None:
-        self.resolverManager.resolving_indexes.pop(index,None)
-        if(self.playlistManager.table):
-            index=self.table.get_dynamic_item(index)
-        if index is None:
-            return
-        auto_play = self.playlistManager.resolve_autoplay
-        if index < 0 or index >= len(self.playlistManager.playlist):
-            return
-
-        if not item.page_url==self.playlistManager.playlist[index].page_url:
-            return
-
-        cached_waveform = self.waveform_cache.get(item.page_url)
-        if cached_waveform:
-            item.waveform = cached_waveform
-            item.waveform_ready = True
-
-        self.playlistManager.playlist[index] = item
-        if(self.playlistManager.table):
-            self.table.setItemLoading(index,False)
-            self.table.update_row(index, item)
         self.update_status_bar(f"Resolved: {item.title}")
 
         if self.playlistManager.current_index == index:
-            self.update_current_metadata(item)
+            self.main_window.update_current_metadata(item) # to emit
 
-        if not auto_play == None:
-            if(auto_play==index):
+        if not self.playlistManager.resolve_autoplay == None:
+            if(self.playlistManager.resolve_autoplay==index):
                 self.start_playback(index)
 
-    def on_resolve_failed(
-        self,
-        index: Optional[int],
-        error: str,
-        details: str = "",
-    ) -> None:
-        self.resolverManager.resolving_indexes.pop(index,None)
-        index=self.table.get_dynamic_item(index)
-        if not(index==None):
-            self.table.setItemLoading(index,False)
-            if 0 <= index < len(self.playlistManager.playlist):
-                item = self.playlistManager.playlist[index]
-                item.stream_url = ""
-                item.load_error = error
-                item.unavailable = True
-                if item.title == "Loading...":
-                    item.title = "Video unavailable" if item.unavailable else "Resolve failed"
-                self.table.update_row(index, item)
-                title = item.page_url
-            else:
-                title = "item"
-
+    def on_resolve_failed(self,index: Optional[int],error: str,details: str = "",resolve_autoplay=False) -> None:
         message = f"yt-dlp failed: {error}"
         self.update_status_bar(message)
-        console_details = details or message
-        print(console_details, file=sys.stderr, flush=True)
-        logging.error("%s\n%s", message, console_details)
 
-        if not(index==None):
-            if(index==self.playlistManager.resolve_autoplay):
-                box = QMessageBox(self)
-                box.setIcon(QMessageBox.Warning)
-                box.setWindowTitle("yt-dlp error")
-                box.setText(error)
-                if details:
-                    box.setDetailedText(details)
-                self.error_boxes.append(box)
-                box.finished.connect(lambda _result, item=box: self.release_error_box(item))
-                box.open()
-
-            self.playlistManager.resolve_autoplay=None
+        if (resolve_autoplay):
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Warning)
+            box.setWindowTitle("yt-dlp error")
+            box.setText(error)
+            if details:
+                box.setDetailedText(details)
+            self.error_boxes.append(box)
+            box.finished.connect(lambda _result, item=box: self.release_error_box(item))
+            box.open()
 
     def release_error_box(self, box: QMessageBox) -> None:
         if box in self.error_boxes:
@@ -1019,10 +942,8 @@ class PlayerWindow(SkinManager,AudioController):
             self.playlistManager.current_index -= 1
         self.refresh_table()
 
-    def clear_playlist(self) -> None:
+    def on_playlist_cleared(self) -> None:
         self.stop_playback()
-
-        self.playlistManager.clear_playlist()
 
         self.position_slider.setRange(0, 0)
         self.set_metaData(
@@ -1045,6 +966,9 @@ class PlayerWindow(SkinManager,AudioController):
             "CanGoPrevious": False,
             "CanPlay": False,
         })
+
+    def clear_playlist(self) -> None:
+        self.playlistManager.clear_playlist()
 
     def move_selected(self, direction: int) -> None:
         row = self.table.currentRow()
@@ -1299,7 +1223,7 @@ class PlayerWindow(SkinManager,AudioController):
         if item.duration:
             metadata["mpris:length"] = Variant("x", int(item.duration * 1000 * 1000))
         if item.artwork_url:
-            metadata["mpris:artUrl"] = Variant("s", item.artwork_url)
+            metadata["mpris:artUrl"] = Variant("s", "https://cdn.maxsspeaker.space/Server/DiscordRPC/imgRPC?img="+item.artwork_url)
         return metadata
 
     def next_index_after_current(self) -> Optional[int]:

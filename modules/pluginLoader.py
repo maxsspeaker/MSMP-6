@@ -148,7 +148,6 @@ class PluginManagerWidget(QWidget):
         
         # --- Пути ---
         self.plugins_dir = Path(plugins_dir)
-        self.settings_file = Path("settings.json")
 
         if (config.get("plugins")==None):
             config["plugins"]={}
@@ -194,10 +193,6 @@ class PluginManagerWidget(QWidget):
         self._populate_list()
         self._update_all_colors() 
         self._apply_filters()
-
-    def _save_settings(self):
-        with open(self.settings_file, "w", encoding="utf-8") as f:
-            json.dump(self.config["plugins"], f, indent=4)
 
     def _load_plugins(self):
         if not self.plugins_dir.exists():
@@ -335,7 +330,6 @@ class PluginManagerWidget(QWidget):
 
     def _on_plugin_toggled(self, pid, checked):
         self.config["plugins"][pid] = checked
-        self._save_settings()
         self._update_all_colors()
         self._check_restart_needed() # Проверяем, изменилось ли состояние
         self._apply_filters()        # Обновляем фильтр (вдруг мы в режиме "Отключённые" и включили плагин)

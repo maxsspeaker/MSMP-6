@@ -9,7 +9,8 @@ from PySide6.QtGui import QColor,QPixmap, QPainter, QLinearGradient, QImage,QPal
 from PySide6.QtCore import QPropertyAnimation, QRect, QEasingCurve, Qt, Signal,QObject, QProcess,QParallelAnimationGroup,QSize, Slot,QPersistentModelIndex,Property,QTimer
 from PySide6.QtMultimedia import QAudioOutput, QMediaDevices, QMediaPlayer,QAudioBufferOutput, QAudioDevice
 
-from .types import PlaylistItem
+from .types import PlaylistItem,PlaylistSignals
+from . import extractors
 import __main__ 
 import re
 import subprocess
@@ -17,6 +18,11 @@ import shutil
 import json,yaml
 import numpy as np
 import queue
+from typing import Optional
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 class GradientImageLabel(QLabel):
     """Супер пупер навороченое отображение картинки, спиженный с моего Minecraft лаунчера"""
@@ -235,62 +241,8 @@ class AudioController():
             self.audio_output.setDevice(self.current_device)
 
 
-class LoadingOverlay(QWidget):
-    """Виджет-оверлей, который будет накладываться поверх строки"""
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        
-        # Делаем фон полупрозрачным (RGBA: черный цвет с прозрачностью 100 из 255)
-        self.setStyleSheet("""
-            LoadingOverlay {
-                background-color: rgba(0, 0, 0, 100); 
-            }
-        """)
-        
-        # Создаем бесконечный прогресс-бар (анимация загрузки)
-        self.spinner = QProgressBar(self)
-        self.spinner.setRange(0, 0) # Range(0, 0) делает его бесконечным
-        self.spinner.setTextVisible(False)
-        self.spinner.setFixedHeight(15)
-        
-        # Размещаем по центру
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 0, 10, 0)
-        layout.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self.spinner)
-
-
-class OverlaySelectionDelegate(QStyledItemDelegate):
-    def paint(self, painter, option, index):
-        opt = QStyleOptionViewItem(option)
-        self.initStyleOption(opt, index)
-
-        real_bg = index.data(Qt.ItemDataRole.BackgroundRole)
-        real_fg = index.data(Qt.ItemDataRole.ForegroundRole)
-
-        if real_bg is not None:
-            painter.fillRect(opt.rect, real_bg)
-        else:
-            painter.fillRect(opt.rect, opt.palette.base())
-
-        is_selected = opt.state & QStyle.StateFlag.State_Selected
-        if is_selected:
-            highlight_color = opt.palette.highlight().color()
-            painter.fillRect(opt.rect, highlight_color)
-            opt.state &= ~QStyle.StateFlag.State_Selected
-
-        opt.backgroundBrush = QBrush(Qt.BrushStyle.NoBrush) # use qproperty-treakBgColor!
-
-        if real_fg is not None:
-            opt.palette.setBrush(QPalette.ColorRole.Text, real_fg)
-            opt.palette.setBrush(QPalette.ColorRole.WindowText, real_fg)
-
-        widget = option.widget
-        style = widget.style() if widget else QApplication.style()
-        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, widget)
-
 class PlaylistManager():
-    def __init__(self,main_window):
+    def __init__(self,main_window,thread_pool):
         self.main_window=main_window
 
         self.playlist: list[PlaylistItem] = []
@@ -300,8 +252,103 @@ class PlaylistManager():
         self.playlist_image_url = "https://msmp.maxsspeaker.space/static/img/Missing.png"
         self.current_index = 0
         self.playlist: list[PlaylistItem] = []
+        self.waveform_cache=None
+
+        self.resolverManager = extractors.resolverControler(thread_pool)
+
+        self._resolve_signals = extractors.ResolveSignals()
+        self._resolve_signals.resolved.connect(self.on_resolved)
+        self._resolve_signals.failed.connect(self.on_resolve_failed)
+
+        self._resolve_signals.parsed.connect(self.on_jam_playlist_parsed)
+
+        self.events = PlaylistSignals()
 
         self.table=None
+
+    def on_resolved(self, index: int, item: PlaylistItem) -> None:
+        self.resolverManager.resolving_indexes.pop(index,None)
+        if(self.table):
+            index=self.table.get_dynamic_item(index)
+        if index is None:
+            return
+        auto_play = self.resolve_autoplay
+        if index < 0 or index >= len(self.playlist):
+            return
+
+        if not item.page_url==self.playlist[index].page_url:
+            return
+
+        if self.waveform_cache:
+            cached_waveform = self.waveform_cache.get(item.page_url)
+            if cached_waveform:
+                item.waveform = cached_waveform
+                item.waveform_ready = True
+
+        self.playlist[index] = item
+        if(self.table):
+            self.table.setItemLoading(index,False)
+            self.table.update_row(index, item)
+
+        self.events.resolved.emit(index, item)
+
+
+    def on_resolve_failed(self,index: Optional[int],error: str,details: str = "") -> None:
+        self.resolverManager.resolving_indexes.pop(index,None)
+        index=self.table.get_dynamic_item(index)
+        if not(index==None):
+            if(self.table):
+                self.table.setItemLoading(index,False)
+            if 0 <= index < len(self.playlist):
+                item = self.playlist[index]
+                item.stream_url = ""
+                item.load_error = error
+                item.unavailable = True
+                if item.title == "Loading...":
+                    item.title = "Video unavailable" if item.unavailable else "Resolve failed"
+                if(self.table):
+                    self.table.update_row(index, item)
+                title = item.page_url
+            else:
+                title = "item"
+
+        console_details = details or message
+        message = f"yt-dlp failed: {error}"
+        print(console_details, file=sys.stderr, flush=True)
+        logger.error("%s\n%s", message, console_details)
+
+        resolve_autoplay=False
+
+        if not(index==None):
+            if(index==self.resolve_autoplay):
+                resolve_autoplay=True
+                self.resolve_autoplay=None
+
+        self.events.failed.emit(index,error,details,resolve_autoplay)
+
+
+
+    def on_jam_playlist_parsed(self,index: Optional[int],items: object,playlist_title: str,) -> None:
+        if not isinstance(items, list) or not items:
+            self.events.parsed.emit(index,items,playlist_title)
+            return
+
+        parsed_items = [item for item in items if isinstance(item, PlaylistItem)]
+        if not parsed_items:
+            self.events.parsed.emit(index,items,playlist_title)
+            return
+
+        self.events.cleared.emit()
+
+        self.playlist_title = playlist_title or "Jam playlist"
+        self.playlist = parsed_items
+        self.current_index = None
+        self.resolverManager.clear()
+        self.resolve_autoplay = None
+        self.refresh_table()
+
+        self.events.parsed.emit(index,items,playlist_title)
+
 
     def link_playlistWidget_to_manager(self,table):
         self.table=table
@@ -405,10 +452,10 @@ class PlaylistManager():
             self.resolve_autoplay = index
 
         if(self.table):
-            if self.main_window.resolverManager.resolving_indexes.get(self.table.link_dynamic_item(index)):
+            if self.resolverManager.resolving_indexes.get(self.table.link_dynamic_item(index)):
                 return
         else:
-            if self.main_window.resolverManager.resolving_indexes.get(index):
+            if self.resolverManager.resolving_indexes.get(index):
                 return
 
         if(type=="audio" or type=="video"):
@@ -427,10 +474,10 @@ class PlaylistManager():
             link_index=index
 
 
-        self.main_window.resolverManager.addTask(link_index,self.main_window.plugin_loader.find_resolver(
+        self.resolverManager.addTask(link_index,self.main_window.plugin_loader.find_resolver(
             link_index,
             self.playlist[index],
-            self.main_window.resolve_signals,
+            self._resolve_signals,
             self.main_window.config["cookies"]["browser"],
             proxy=self.main_window.proxy.get(),
             type=type
@@ -443,6 +490,62 @@ class PlaylistManager():
 
         if(self.table):
             self.table.clearPlaylistView()
+
+        self.events.cleared.emit()
+
+class LoadingOverlay(QWidget):
+    """Виджет-оверлей, который будет накладываться поверх строки"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        
+        # Делаем фон полупрозрачным (RGBA: черный цвет с прозрачностью 100 из 255)
+        self.setStyleSheet("""
+            LoadingOverlay {
+                background-color: rgba(0, 0, 0, 100); 
+            }
+        """)
+        
+        # Создаем бесконечный прогресс-бар (анимация загрузки)
+        self.spinner = QProgressBar(self)
+        self.spinner.setRange(0, 0) # Range(0, 0) делает его бесконечным
+        self.spinner.setTextVisible(False)
+        self.spinner.setFixedHeight(15)
+        
+        # Размещаем по центру
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 0, 10, 0)
+        layout.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.spinner)
+
+
+class OverlaySelectionDelegate(QStyledItemDelegate):
+    def paint(self, painter, option, index):
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+
+        real_bg = index.data(Qt.ItemDataRole.BackgroundRole)
+        real_fg = index.data(Qt.ItemDataRole.ForegroundRole)
+
+        if real_bg is not None:
+            painter.fillRect(opt.rect, real_bg)
+        else:
+            painter.fillRect(opt.rect, opt.palette.base())
+
+        is_selected = opt.state & QStyle.StateFlag.State_Selected
+        if is_selected:
+            highlight_color = opt.palette.highlight().color()
+            painter.fillRect(opt.rect, highlight_color)
+            opt.state &= ~QStyle.StateFlag.State_Selected
+
+        opt.backgroundBrush = QBrush(Qt.BrushStyle.NoBrush) # use qproperty-treakBgColor!
+
+        if real_fg is not None:
+            opt.palette.setBrush(QPalette.ColorRole.Text, real_fg)
+            opt.palette.setBrush(QPalette.ColorRole.WindowText, real_fg)
+
+        widget = option.widget
+        style = widget.style() if widget else QApplication.style()
+        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, widget)
 
 
 class PlaylistWidget(QTableWidget):

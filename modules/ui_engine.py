@@ -255,7 +255,7 @@ class UIEngine:
         return decorator
 
     @staticmethod
-    def _resolve_class(tag: str) -> tuple[type | None, bool]:
+    def _resolve_class(tag: str) -> tuple[type | None, bool, bool]:
         key = tag.lower()
         if key in _CUSTOM_WIDGET_REGISTRY:
             return _CUSTOM_WIDGET_REGISTRY[key], False, True
