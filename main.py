@@ -377,6 +377,8 @@ class WaveformTask(QRunnable):
             raise RuntimeError("track duration is unknown")
 
         CREATE_NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0) if sys.platform == "win32" else 0
+        custom_env = dict(os.environ)
+        custom_env.pop("LD_PRELOAD", None)
  
         sample_rate = 22050
         chunk_samples = 2048
@@ -406,7 +408,7 @@ class WaveformTask(QRunnable):
             "pipe:1",
         ]
 
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,creationflags=CREATE_NO_WINDOW)
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,creationflags=CREATE_NO_WINDOW,env=custom_env)
         assert proc.stdout is not None
         assert proc.stderr is not None
 
@@ -537,7 +539,8 @@ class PlayerWindow(SkinManager,AudioController):
             self.config["skin"]=args.skin
 
         if (sys.platform == "linux"):
-            os.environ["QT_AUDIO_BACKEND"] =  os.environ.get("QT_AUDIO_BACKEND",self.config.get("AUDIO_BACKEND","PulseAudio"))
+            if(self.config.get("AUDIO_BACKEND")):
+                os.environ["QT_AUDIO_BACKEND"] =  os.environ.get("QT_AUDIO_BACKEND",self.config.get("AUDIO_BACKEND"))
 
         self.plugin_loader = PluginLoader(self.config)
         self.plugin_loader.load_allowed(context=self)
