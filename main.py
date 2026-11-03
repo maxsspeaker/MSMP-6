@@ -645,12 +645,8 @@ class PlayerWindow(SkinManager,AudioController):
             pass
 
     def resizeEvent(self, event):
+        self.events.on_app_resized.emit(event)
         super().resizeEvent(event)
-
-        cover_background = self.ui.get("cover_background")
-        if(cover_background):
-            cover_background.setGeometry(cover_background.parentWidget().rect())
-            #self.cover_background.setGeometry(0, 0, self.width(), self.height())
 
     def add_url(self) -> None:
         url = self.url_input.text().strip()
@@ -1058,6 +1054,8 @@ class PlayerWindow(SkinManager,AudioController):
         cover_background = self.ui.get("cover_background")
 
         if pixmap.loadFromData(data):
+            self._skin_events.on_update_current_cover.emit(pixmap)
+            self._skin_events.on_update_current_background.emit(pixmap)
             if(cover_label):
                 scaled = pixmap.scaled(
                     cover_label.size(),

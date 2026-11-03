@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 class GradientImageLabel(QLabel):
     """Супер пупер навороченое отображение картинки, спиженный с моего Minecraft лаунчера"""
-    def __init__(self, parent=None,gradient:list = [],blur_effect:int = 0):
+    def __init__(self, parent=None,gradient:list = [],blur_effect:int = 0,background_mode:bool = False):
         super().__init__(parent)
         self.original_pixmap = QPixmap()
         # ОТКЛЮЧАЕМ стандартное искажающее растягивание Qt
@@ -35,6 +35,13 @@ class GradientImageLabel(QLabel):
         self.blur_effect = QGraphicsBlurEffect()
         self.blur_effect.setBlurRadius(blur_effect)
         self.setGraphicsEffect(self.blur_effect)
+        self.gradient=gradient
+
+        self._is_subscribed = False 
+
+        self.background_mode=background_mode
+
+    def set_gradient(self,gradient:list = []):
         self.gradient=gradient
         
     def set_new_image(self, image_source):
@@ -106,10 +113,29 @@ class GradientImageLabel(QLabel):
         # Выводим в QLabel
         self.setPixmap(QPixmap.fromImage(result_image))
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        
+        # МАГИЯ ЗДЕСЬ: находим самое главное окно (на самый верх иерархии)
+        top_window = self.window()
+
+        if not(self._is_subscribed):
+            self.window().events.on_app_resized.connect(
+                self.on_window_resize, 
+                Qt.ConnectionType.UniqueConnection
+            )
+            self._is_subscribed = True
+
+    def on_window_resize(self, event):
+        if(self.background_mode):
+            self.setGeometry(self.parentWidget().rect())
+
     def resizeEvent(self, event):
         """При ресайзе картинка автоматически перекадрируется и центрируется заново"""
+
         super().resizeEvent(event)
         self.update_gradient_mask()
+
 
 class MarqueeLabel(QLabel):
     def __init__(self, parent_or_text=None, parent=None, **kwargs):

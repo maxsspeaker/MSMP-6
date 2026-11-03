@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from PySide6.QtCore import QObject, Signal,QRunnable
+from PySide6.QtCore import QObject, Signal,QRunnable,QEvent
 from typing import Optional
 
 
@@ -42,6 +42,11 @@ class PlayerEvents(QObject):
     # Жизненный цикл программы
     on_app_loading_finished = Signal()         # Программа Загрузилась
     on_app_closing = Signal()                  # Программа закрывается 
+    on_app_resized = Signal(object)
+
+class SkinEvents(QObject):
+    on_update_current_cover = Signal(object)  # Обновление текущей картинки альбома
+    on_update_current_background = Signal(object)  # Обновление текущего фона
 
 
 class PlaylistSignals(QObject):

@@ -90,6 +90,8 @@ from PySide6.QtGui import QIcon,QBrush, QColor, QLinearGradient, QPainter, QPixm
 from modules.other import SystemMenuBar
 from modules.AboutWindow import AboutWindow
 
+from modules.types import SkinEvents
+
 
 
 WAVEFORM_BIN_COUNT = 440
@@ -266,10 +268,10 @@ class UIEngine:
     # ── Конструктор ───────────────────────────────────────────────────────────
 
     def __init__(
-        self,
+        self,events: SkinEvents,
         context: Any = None,
         default_spacing: int = 6,
-        default_margin: int | tuple[int, int, int, int] = 8,
+        default_margin: int | tuple[int, int, int, int] = 8
     ) -> None:
         self.context = context
         self.default_spacing = default_spacing
@@ -277,6 +279,7 @@ class UIEngine:
             default_margin if isinstance(default_margin, tuple)
             else (default_margin,) * 4
         )
+        self.events=events
         self.widgets: dict[str, QWidget] = {}
 
     # ── Публичный API ─────────────────────────────────────────────────────────
@@ -371,6 +374,10 @@ class UIEngine:
             widget.setVisible(_bool(attrs["visible"]))
         if "icon" in attrs:
             self._apply_icon(widget, attrs["icon"],self._skin_path)
+        if "image" in attrs:
+            self._apply_image(widget, attrs["image"],self._skin_path,self.events)
+        if "gradient" in attrs:
+            self._apply_gradient(widget, attrs["gradient"])
 
         # 6. Размеры ───────────────────────────────────────────────────────────
         if "min-width" in attrs or "min-height" in attrs:
@@ -470,6 +477,44 @@ class UIEngine:
             return
         if hasattr(widget, "setIcon"):
             widget.setIcon(QIcon(icon.replace("{internal}", _skin_path, 1) if icon.startswith("{internal}") else icon))
+
+    @staticmethod
+    def _apply_image(widget: QWidget, image: str, _skin_path: str,events:SkinEvents) -> None:
+        if not image:
+            return
+        if hasattr(widget, "set_new_image"):
+            if image.startswith("{current_cover}"):
+                events.on_update_current_cover.connect(widget.set_new_image)
+            elif image.startswith("{current_background}"):
+                events.on_update_current_background.connect(widget.set_new_image)
+            else:
+                widget.set_new_image(image.replace("{internal}", _skin_path, 1) if image.startswith("{internal}") else image)
+
+    @staticmethod
+    def _apply_gradient(widget: QWidget, gradient_str: str) -> None:
+        # Проверяем, что строка не пустая и виджет поддерживает градиент
+        if not gradient_str or not hasattr(widget, "set_gradient"):
+            return
+
+        gradient_list = []
+
+        # Разбиваем строку по ";" для получения отдельных точек
+        for stop in gradient_str.split(";"):
+            parts = stop.strip().split(",")
+            
+            # Убеждаемся, что в точке ровно 5 значений (pos, r, g, b, a)
+            if len(parts) == 5:
+                pos = float(parts[0])
+                # map(int, parts[1:]) превращает строки '0','0','0','128' в числа
+                # Звёздочка (*) распаковывает их сразу в аргументы QColor(r, g, b, a)
+                color = QColor(*map(int, parts[1:])) 
+                print((pos, color),flush=True)
+                
+                gradient_list.append((pos, color))
+
+        # Передаем готовый список в виджет
+        if gradient_list:
+            widget.set_gradient(gradient_list)
 
     @staticmethod
     def _apply_specifics(widget: QWidget, attrs: dict, text: str) -> None:
@@ -747,9 +792,11 @@ class SkinManager(QMainWindow):
             self._setup_MainMenuBar()
             return
 
+        self._skin_events=SkinEvents()
+
         _ui_xml_path = os.path.join(os.path.dirname(sys.modules['__main__'].__file__), f"skins/{self.config["skin"]}")
 
-        self._engine = UIEngine(context=self, default_spacing=0, default_margin=0)
+        self._engine = UIEngine(events=self._skin_events,context=self, default_spacing=0, default_margin=0)
         container = self._engine.build_file(_ui_xml_path)
 
 
@@ -951,6 +998,9 @@ class SkinManager(QMainWindow):
             cover_background.set_new_image(QPixmap("resources/MSMPwaveBg.png"))
         if(cover_label):
             cover_label.set_new_image(QPixmap("resources/MSMPwave.png"))
+
+        self._skin_events.on_update_current_cover.emit("resources/MSMPwave.png")
+        self._skin_events.on_update_current_background.emit("resources/MSMPwaveBg.png")
 
 
     def set_metaData(self,time_possition=None,time_end=None,track_title=None,artist=None,album=None):
