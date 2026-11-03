@@ -1049,6 +1049,9 @@ class SkinManager(QMainWindow):
 
         current_index=self.playlistManager.current_index
 
+        self._skin_events.on_update_current_cover.disconnect()
+        self._skin_events.on_update_current_background.disconnect()
+
 
         if(self.visualizer_window):
             self.audio_buffer_output.audioBufferReceived.disconnect(self.on_audio_buffer_received) # пример прямо здесь
