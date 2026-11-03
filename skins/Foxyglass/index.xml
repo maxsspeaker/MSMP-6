@@ -29,8 +29,8 @@
 
         <!-- Фоновое изображение — позиционируется вручную через resizeEvent -->
         <gradientImageLabel id="cover_background"
-                            fixed-height="210" Align="AlignCenter"
-                            visible="true" blur_effect="16" nolayout="true"/>
+                            fixed-height="210" Align="AlignCenter" gradient="0.95,0,0,0,0; 0.6,0,0,0,128"
+                            visible="true" blur_effect="16" nolayout="true" background_mode="true" image="{current_background}"/>
 
         <systemmenubar id="MainMenuBar" visible="true"/>
 
