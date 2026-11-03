@@ -115,16 +115,18 @@ class GradientImageLabel(QLabel):
 
     def showEvent(self, event):
         super().showEvent(event)
+
         
         # МАГИЯ ЗДЕСЬ: находим самое главное окно (на самый верх иерархии)
         top_window = self.window()
 
-        if not(self._is_subscribed):
-            self.window().events.on_app_resized.connect(
-                self.on_window_resize, 
-                Qt.ConnectionType.UniqueConnection
-            )
-            self._is_subscribed = True
+        if hasattr(top_window,"events"):
+            if not(self._is_subscribed):
+                self.window().events.on_app_resized.connect(
+                    self.on_window_resize, 
+                    Qt.ConnectionType.UniqueConnection
+                )
+                self._is_subscribed = True
 
     def on_window_resize(self, event):
         if(self.background_mode):
