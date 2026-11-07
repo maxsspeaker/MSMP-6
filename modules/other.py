@@ -2,11 +2,11 @@ import random,hashlib
 import os,sys
 
 from PySide6.QtWidgets import (
-    QApplication, QWidget, QPushButton, QVBoxLayout,QTableWidget, QProgressBar,
+    QApplication, QWidget, QPushButton, QVBoxLayout,QTableWidget, QProgressBar,QGraphicsScene,QScrollBar,
     QHBoxLayout, QGraphicsOpacityEffect, QLabel, QGraphicsBlurEffect,QComboBox,QFrame,QStyleOptionViewItem,QListView,QStyledItemDelegate,QSizePolicy, QStyle,QMenu, QStyleOption,QTableWidgetItem,QAbstractItemView,QSizePolicy
 )
 from PySide6.QtGui import QColor,QPixmap, QPainter, QLinearGradient, QImage,QPalette, QPen, QBrush,QAction,QFont,QPalette
-from PySide6.QtCore import QPropertyAnimation, QRect, QEasingCurve, Qt, Signal,QObject, QProcess,QParallelAnimationGroup,QSize, Slot,QPersistentModelIndex,Property,QTimer
+from PySide6.QtCore import QEvent,QRectF,QPropertyAnimation, QRect, QEasingCurve, Qt, Signal,QObject, QProcess,QParallelAnimationGroup,QSize, Slot,QPersistentModelIndex,Property,QTimer
 from PySide6.QtMultimedia import QAudioOutput, QMediaDevices, QMediaPlayer,QAudioBufferOutput, QAudioDevice
 
 from .types import PlaylistItem,PlaylistSignals
@@ -25,24 +25,39 @@ import logging
 logger = logging.getLogger(__name__)
 
 class GradientImageLabel(QLabel):
-    """Супер пупер навороченое отображение картинки, спиженный с моего Minecraft лаунчера"""
-    def __init__(self, parent=None,gradient:list = [],blur_effect:int = 0,background_mode:bool = False):
+    # Добавлен параметр glass_tint (по умолчанию 0 - никакого затенения)
+    def __init__(self, parent=None, gradient: list = None, blur_effect: int = 0, background_mode: bool = False, glass_mode: bool = False, glass_tint: int = 0):
         super().__init__(parent)
         self.original_pixmap = QPixmap()
-        # ОТКЛЮЧАЕМ стандартное искажающее растягивание Qt
         self.setScaledContents(False) 
 
-        self.blur_effect = QGraphicsBlurEffect()
-        self.blur_effect.setBlurRadius(blur_effect)
-        self.setGraphicsEffect(self.blur_effect)
-        self.gradient=gradient
-
+        self.gradient = gradient if gradient is not None else []
+        self.background_mode = background_mode
         self._is_subscribed = False 
+        
+        self.glass_mode = glass_mode
+        self.blur_radius = blur_effect
+        self.glass_tint = glass_tint # Сохраняем уровень затенения
 
-        self.background_mode=background_mode
+        if self.glass_mode:
+            self.noise_texture = self._generate_noise(128, 128)
+        else:
+            self.blur_effect = QGraphicsBlurEffect()
+            self.blur_effect.setBlurRadius(self.blur_radius)
+            self.setGraphicsEffect(self.blur_effect)
 
-    def set_gradient(self,gradient:list = []):
-        self.gradient=gradient
+    def _generate_noise(self, w, h):
+        """Генерация текстуры индустриального точечного шума"""
+        img = QImage(w, h, QImage.Format.Format_ARGB32)
+        for y in range(h):
+            for x in range(w):
+                val = random.randint(0, 255)
+                img.setPixelColor(x, y, QColor(255, 255, 255, 12 if val > 127 else 5))
+        return QPixmap.fromImage(img)
+
+    def set_gradient(self, gradient: list = None):
+        self.gradient = gradient if gradient is not None else []
+        self.update_gradient_mask()
         
     def set_new_image(self, image_source):
         """Динамически принимает путь к файлу (str) или готовый QPixmap"""
@@ -57,84 +72,102 @@ class GradientImageLabel(QLabel):
         if self.original_pixmap.isNull():
             return
 
-        # Получаем текущие размеры самого виджета QLabel
         target_width = self.width()
         target_height = self.height()
         
         if target_width <= 0 or target_height <= 0:
             return
 
-        # 1. Конвертируем оригинал в QImage с поддержкой Альфа-канала
         src_image = self.original_pixmap.toImage().convertToFormat(QImage.Format.Format_ARGB32_Premultiplied)
         
-        # 2. РАСЧЕТ КАДРИРОВАНИЯ И ЦЕНТРИРОВАНИЯ (Аналог object-fit: cover)
         src_width = src_image.width()
         src_height = src_image.height()
         
-        # Вычисляем коэффициенты масштабирования
         scale_w = target_width / src_width
         scale_h = target_height / src_height
-        scale = max(scale_w, scale_h) # Берем максимальный, чтобы залить всю площадь
+        scale = max(scale_w, scale_h) 
         
-        # Размеры картинки после пропорционального масштабирования
         new_w = int(src_width * scale)
         new_h = int(src_height * scale)
         
-        # Масштабируем исходное изображение сглаженным алгоритмом
         scaled_image = src_image.scaled(new_w, new_h, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
         
-        # Находим координаты для вырезания центральной части (центрирование)
+        if self.glass_mode and self.blur_radius > 0:
+            temp_pixmap = QPixmap.fromImage(scaled_image)
+            scene = QGraphicsScene()
+            item = scene.addPixmap(temp_pixmap)
+            
+            blur = QGraphicsBlurEffect()
+            blur.setBlurRadius(self.blur_radius)
+            item.setGraphicsEffect(blur)
+            
+            blurred_pixmap = QPixmap(temp_pixmap.size())
+            blurred_pixmap.fill(Qt.GlobalColor.transparent)
+            
+            p_blur = QPainter(blurred_pixmap)
+            scene.render(p_blur, QRectF(blurred_pixmap.rect()), QRectF(temp_pixmap.rect()))
+            p_blur.end()
+            
+            scaled_image = blurred_pixmap.toImage()
+
         crop_x = (new_w - target_width) // 2
         crop_y = (new_h - target_height) // 2
-        
-        # Вырезаем кадр точно под размер QLabel
         cropped_image = scaled_image.copy(QRect(crop_x, crop_y, target_width, target_height))
 
-        # 3. НАЛОЖЕНИЕ ГРАДИЕНТА ПРОЗРАЧНОСТИ
-        # Создаем пустой холст строго под размер QLabel и заливаем прозрачностью
         result_image = QImage(target_width, target_height, QImage.Format.Format_ARGB32_Premultiplied)
         result_image.fill(QColor(0, 0, 0, 0)) 
         
         painter = QPainter(result_image)
-        # Рисуем уже отцентрированный и обрезанный кадр
         painter.drawImage(0, 0, cropped_image)
         
-        # Применяем маску прозрачности
-        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
-        
-        # Линейный градиент сверху вниз по размеру виджета
-        gradient = QLinearGradient(0, 0, 0, target_height)
-        for x in self.gradient:
-            gradient.setColorAt(x[0], x[1]) 
-        
-        painter.fillRect(result_image.rect(), gradient)
+        if self.glass_mode:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+            
+            # Тонировка применяется ТОЛЬКО если glass_tint больше 0.
+            if self.glass_tint > 0:
+                painter.fillRect(result_image.rect(), QColor(15, 15, 15, self.glass_tint))
+            
+            # Шероховатость (Шум)
+            painter.drawTiledPixmap(result_image.rect(), self.noise_texture)
+            
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        if self.gradient:
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
+            gradient_fill = QLinearGradient(0, 0, 0, target_height)
+            
+            for x in self.gradient:
+                if isinstance(x[1], QColor):
+                    gradient_fill.setColorAt(x[0], x[1])
+                else:
+                    gradient_fill.setColorAt(x[0], QColor(0, 0, 0, int(x[1] * 255)))
+            
+            painter.fillRect(result_image.rect(), gradient_fill)
+            
         painter.end()
         
-        # Выводим в QLabel
         self.setPixmap(QPixmap.fromImage(result_image))
 
     def showEvent(self, event):
         super().showEvent(event)
-
         
-        # МАГИЯ ЗДЕСЬ: находим самое главное окно (на самый верх иерархии)
         top_window = self.window()
 
-        if hasattr(top_window,"events"):
-            if not(self._is_subscribed):
+        if hasattr(top_window, "events"):
+            if not self._is_subscribed:
                 self.window().events.on_app_resized.connect(
                     self.on_window_resize, 
                     Qt.ConnectionType.UniqueConnection
                 )
                 self._is_subscribed = True
+                self.setGeometry(self.parentWidget().rect())
 
     def on_window_resize(self, event):
-        if(self.background_mode):
+        if self.background_mode and self.parentWidget():
             self.setGeometry(self.parentWidget().rect())
 
     def resizeEvent(self, event):
         """При ресайзе картинка автоматически перекадрируется и центрируется заново"""
-
         super().resizeEvent(event)
         self.update_gradient_mask()
 
@@ -587,6 +620,22 @@ class OverlaySelectionDelegate(QStyledItemDelegate):
         style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, widget)
 
 
+class ScrollBarHoverFilter(QObject):
+    def eventFilter(self, obj, event):
+        if event.type() in (QEvent.Enter, QEvent.Leave):
+            hovered = event.type() == QEvent.Enter
+
+            if obj.property("barHovered") != hovered:
+                obj.setProperty("barHovered", hovered)
+
+                style = obj.style()
+                style.unpolish(obj)
+                style.polish(obj)
+                obj.update()
+
+        return False
+
+
 class PlaylistWidget(QTableWidget):
     """Кастомная таблица с поддержкой блокировки строк"""
     def __init__(self, rows=None, cols=None, parent=None,rowHeight:int = 44,inlineAudio: bool = False):
@@ -627,6 +676,20 @@ class PlaylistWidget(QTableWidget):
         self.setAcceptDrops(True)
         self.setDropIndicatorShown(True)
         self.setDragDropMode(QAbstractItemView.InternalMove)
+
+        #self.setVerticalScrollBar(
+        #    QScrollBar(Qt.Orientation.Vertical)
+        #)
+
+
+        #self.bar = self.verticalScrollBar()
+
+        #self._scrollbar_hover_filter = ScrollBarHoverFilter(self)
+        #self.verticalScrollBar().installEventFilter(
+        #    self._scrollbar_hover_filter
+        #)
+
+
 
 
     @Property(QColor)
@@ -985,6 +1048,7 @@ class PlaylistWidget(QTableWidget):
         if hours:
             return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
         return f"{minutes}:{seconds:02d}"
+
 
 
 
