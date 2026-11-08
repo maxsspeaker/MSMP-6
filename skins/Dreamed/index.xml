@@ -21,7 +21,7 @@
          meta-description="Классический тёмный MSMP FoxWave скин">
 
     <gradientImageLabel id="background" Align="AlignCenter" glass_tint="0"
-                            visible="true" blur_effect="6" nolayout="true" background_mode="true" image="{internal}/resources/Background.png" glass_mode="false"/>
+                            visible="true" blur_effect="6" nolayout="true" background_mode="true" image="{internal}/resources/Background.png" glass_mode="true"/>
 
     <!-- ═══════════════════════════════════════════════════════════════
          NowDisplay: обложка / мета / визуализатор / waveform-seekbar
