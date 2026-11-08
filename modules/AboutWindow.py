@@ -171,7 +171,7 @@ class _PsychedelicCanvas(QtWidgets.QWidget):
             painter.setPen(QPen(color, 1.2))
             painter.drawPath(path)
 
-        cx = bounds.width() * (0.31 + 0.035 * math.sin(phase * 0.31))
+        cx = bounds.width() * (0.21 + 0.035 * math.sin(phase * 0.31))
         cy = bounds.height() * (0.50 + 0.06 * math.cos(phase * 0.27))
         max_radius = math.hypot(bounds.width(), bounds.height()) * 0.72
 
@@ -253,7 +253,7 @@ class AboutWindow(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Об этом: MSMP FoxWave")
-        self.setFixedSize(450, 340)
+        self.setFixedSize(520, 340)
         self.setStyleSheet("""
             QDialog { background-color: #08000f; }
             QLabel { background-color: rgba(12, 0, 22, 48); color: #fff0ff; font-weight: bold; }
