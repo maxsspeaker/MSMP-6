@@ -253,7 +253,7 @@ class AboutWindow(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Об этом: MSMP FoxWave")
-        self.setFixedSize(450, 300)
+        self.setFixedSize(450, 340)
         self.setStyleSheet("""
             QDialog { background-color: #08000f; }
             QLabel { background-color: rgba(12, 0, 22, 48); color: #fff0ff; font-weight: bold; }

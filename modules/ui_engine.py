@@ -1019,15 +1019,15 @@ class SkinManager(QMainWindow):
                 time_end_label.setText(f"{time_end}")
 
 
-        if(track_title):
+        if not(track_title==None):
             track_title_label=self.ui.get("track_title_label")
             if(track_title_label):
                 track_title_label.setText(track_title)
-        if(artist):
+        if not(artist==None):
             artist_label=self.ui.get("artist_label")
             if(artist_label):
                 artist_label.setText(artist)
-        if(album):
+        if not(album==None):
             album_label=self.ui.get("album_label")
             if(album_label):
                 album_label.setText(album)
@@ -1058,7 +1058,7 @@ class SkinManager(QMainWindow):
 
         self._init_ui() 
         self.refresh_table()
-        if current_index is not None:
+        if current_index is not None and len(self.playlistManager.playlist):
             self.update_current_metadata(self.playlistManager.playlist[self.playlistManager.current_index])
             self.table.apply_row_style(current_index)
 
