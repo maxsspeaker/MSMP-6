@@ -298,7 +298,7 @@ class AboutWindow(QtWidgets.QDialog):
         except TypeError:
             plugin_count = 0
 
-        self.label.setText(f"""MSMP FoxWave v6.2.0-alpha
+        self.label.setText(f"""MSMP FoxWave v6.2.1-alpha
 
 Легковесный стриминговый плеер использущий pyside6 и yt-dlp
 
