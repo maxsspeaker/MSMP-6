@@ -455,11 +455,17 @@ class PlaylistManager():
         )
 
         self.refresh_table()
+
+        if(data.get("CurrentIndex")):
+            self.current_index=data["CurrentIndex"]
         if(self.table):
             if(isautosave):
                 QTimer.singleShot(0, lambda: self.table.verticalScrollBar().setValue(data["ScrollBarState"]))
             else:
                 QTimer.singleShot(0, lambda: self.table.verticalScrollBar().setValue(0))
+
+            if(data.get("CurrentIndex")):
+                QTimer.singleShot(60, lambda: self.table.selectRow(self.current_index))
 
         self.main_window.events.on_playlist_opened.emit(path,self.playlist)
 
@@ -489,6 +495,8 @@ class PlaylistManager():
             data["ScrollBarState"]=self.table.verticalScrollBar().value()
         else:
             data["ScrollBarState"]=0
+
+        data["CurrentIndex"]=self.current_index
 
         try:
             with open(os.path.join(LocalSaveDir(),"autosave.plmsmpsbox"), "w", encoding="utf-8") as file:
