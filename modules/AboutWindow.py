@@ -171,7 +171,7 @@ class _PsychedelicCanvas(QtWidgets.QWidget):
             painter.setPen(QPen(color, 1.2))
             painter.drawPath(path)
 
-        cx = bounds.width() * (0.31 + 0.035 * math.sin(phase * 0.31))
+        cx = bounds.width() * (0.21 + 0.035 * math.sin(phase * 0.31))
         cy = bounds.height() * (0.50 + 0.06 * math.cos(phase * 0.27))
         max_radius = math.hypot(bounds.width(), bounds.height()) * 0.72
 
@@ -253,7 +253,7 @@ class AboutWindow(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Об этом: MSMP FoxWave")
-        self.setFixedSize(450, 300)
+        self.setFixedSize(520, 340)
         self.setStyleSheet("""
             QDialog { background-color: #08000f; }
             QLabel { background-color: rgba(12, 0, 22, 48); color: #fff0ff; font-weight: bold; }
@@ -298,9 +298,9 @@ class AboutWindow(QtWidgets.QDialog):
         except TypeError:
             plugin_count = 0
 
-        self.label.setText(f"""MSMP FoxWave v6.2.0-alpha
+        self.label.setText(f"""MSMP FoxWave v6.2.1-alpha
 
-Легковесный стриминговый плеер использущий pyside6 и yt-dlp
+Многоисточниковый музыкальный плеер основанный на yt-dlp
 
 • Аудио-движок: QtMultimedia
 • Загружено плагинов: {plugin_count}
@@ -310,7 +310,7 @@ github.com/maxsspeaker/MSMP-6
 
 Twitter художника: @SFCat1225
 
-© 2026 Maxsspeaker. Все права защищены.""")
+Плеер доступен по лицензии GPL-v3""")
         self.label.setMaximumSize(300, 300)
         self.label.setWordWrap(True)
         text_layout.addWidget(self.label)
