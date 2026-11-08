@@ -300,7 +300,7 @@ class AboutWindow(QtWidgets.QDialog):
 
         self.label.setText(f"""MSMP FoxWave v6.2.1-alpha
 
-Легковесный стриминговый плеер использущий pyside6 и yt-dlp
+Многоисточниковый музыкальный плеер основанный на yt-dlp
 
 • Аудио-движок: QtMultimedia
 • Загружено плагинов: {plugin_count}
@@ -310,7 +310,7 @@ github.com/maxsspeaker/MSMP-6
 
 Twitter художника: @SFCat1225
 
-© 2026 Maxsspeaker. Все права защищены.""")
+Плеер доступен по лицензии GPL-v3""")
         self.label.setMaximumSize(300, 300)
         self.label.setWordWrap(True)
         text_layout.addWidget(self.label)
