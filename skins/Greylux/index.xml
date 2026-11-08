@@ -55,9 +55,9 @@
                     <qwidget id="metaAudioBlock" flex="v" margin="0" spacing="0" stretch="1">
 
                         <qwidget stretch="1" />
-                        <qlabel id="track_title_label" style="color:#fff; font-size:19px; font-weight:700;margin:2px; margin-left:10px;" />
-                        <qlabel id="artist_label" style="color:#fff; font-size:14px; margin:2px; margin-left:10px;" />
-                        <qlabel id="album_label" style="color:#fff; font-size:14px; margin:2px; margin-left:10px;" />
+                        <label id="track_title_label" style="color:#fff; font-size:19px; font-weight:700;margin:2px; margin-left:10px;" />
+                        <label id="artist_label" style="color:#fff; font-size:14px; margin:2px; margin-left:10px;" />
+                        <label id="album_label" style="color:#fff; font-size:14px; margin:2px; margin-left:10px;" />
                         <qwidget stretch="1" />
 
                     </qwidget>
@@ -135,7 +135,7 @@
     </qwidget>
 
     <!-- Статусная строка -->
-    <qlabel id="status_label" text="Ready"
+    <label id="status_label" text="Ready"
             style="color:#8f8f8f; padding:5px 10px; border-top:1px solid #161616;" />
 
 </qwidget>

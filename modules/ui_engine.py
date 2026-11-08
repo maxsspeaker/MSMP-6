@@ -82,12 +82,17 @@ from PySide6.QtWidgets import (
     QScroller, 
     QScrollerProperties,
     QAbstractItemView,
-    QToolTip
+    QToolTip,QMenu
 )
 from PySide6.QtCore import Qt, QSize,QTimer,Signal,QEasingCurve
 from PySide6.QtGui import QIcon,QBrush, QColor, QLinearGradient, QPainter, QPixmap,QAction
 
+from modules.other import SystemMenuBar
 from modules.AboutWindow import AboutWindow
+
+from modules.types import SkinEvents
+
+
 
 WAVEFORM_BIN_COUNT = 440
 WAVEFORM_BACKGROUND_COLOR = "#00000000"
@@ -252,7 +257,7 @@ class UIEngine:
         return decorator
 
     @staticmethod
-    def _resolve_class(tag: str) -> tuple[type | None, bool]:
+    def _resolve_class(tag: str) -> tuple[type | None, bool, bool]:
         key = tag.lower()
         if key in _CUSTOM_WIDGET_REGISTRY:
             return _CUSTOM_WIDGET_REGISTRY[key], False, True
@@ -263,10 +268,10 @@ class UIEngine:
     # ── Конструктор ───────────────────────────────────────────────────────────
 
     def __init__(
-        self,
+        self,events: SkinEvents,
         context: Any = None,
         default_spacing: int = 6,
-        default_margin: int | tuple[int, int, int, int] = 8,
+        default_margin: int | tuple[int, int, int, int] = 8
     ) -> None:
         self.context = context
         self.default_spacing = default_spacing
@@ -274,6 +279,7 @@ class UIEngine:
             default_margin if isinstance(default_margin, tuple)
             else (default_margin,) * 4
         )
+        self.events=events
         self.widgets: dict[str, QWidget] = {}
 
     # ── Публичный API ─────────────────────────────────────────────────────────
@@ -368,6 +374,10 @@ class UIEngine:
             widget.setVisible(_bool(attrs["visible"]))
         if "icon" in attrs:
             self._apply_icon(widget, attrs["icon"],self._skin_path)
+        if "image" in attrs:
+            self._apply_image(widget, attrs["image"],self._skin_path,self.events)
+        if "gradient" in attrs:
+            self._apply_gradient(widget, attrs["gradient"])
 
         # 6. Размеры ───────────────────────────────────────────────────────────
         if "min-width" in attrs or "min-height" in attrs:
@@ -467,6 +477,44 @@ class UIEngine:
             return
         if hasattr(widget, "setIcon"):
             widget.setIcon(QIcon(icon.replace("{internal}", _skin_path, 1) if icon.startswith("{internal}") else icon))
+
+    @staticmethod
+    def _apply_image(widget: QWidget, image: str, _skin_path: str,events:SkinEvents) -> None:
+        if not image:
+            return
+        if hasattr(widget, "set_new_image"):
+            if image.startswith("{current_cover}"):
+                events.on_update_current_cover.connect(widget.set_new_image)
+            elif image.startswith("{current_background}"):
+                events.on_update_current_background.connect(widget.set_new_image)
+            else:
+                widget.set_new_image(image.replace("{internal}", _skin_path, 1) if image.startswith("{internal}") else image)
+
+    @staticmethod
+    def _apply_gradient(widget: QWidget, gradient_str: str) -> None:
+        # Проверяем, что строка не пустая и виджет поддерживает градиент
+        if not gradient_str or not hasattr(widget, "set_gradient"):
+            return
+
+        gradient_list = []
+
+        # Разбиваем строку по ";" для получения отдельных точек
+        for stop in gradient_str.split(";"):
+            parts = stop.strip().split(",")
+            
+            # Убеждаемся, что в точке ровно 5 значений (pos, r, g, b, a)
+            if len(parts) == 5:
+                pos = float(parts[0])
+                # map(int, parts[1:]) превращает строки '0','0','0','128' в числа
+                # Звёздочка (*) распаковывает их сразу в аргументы QColor(r, g, b, a)
+                color = QColor(*map(int, parts[1:])) 
+                print((pos, color),flush=True)
+                
+                gradient_list.append((pos, color))
+
+        # Передаем готовый список в виджет
+        if gradient_list:
+            widget.set_gradient(gradient_list)
 
     @staticmethod
     def _apply_specifics(widget: QWidget, attrs: dict, text: str) -> None:
@@ -737,10 +785,18 @@ UIEngine.register("waveformSeekBar",  WaveformSeekBar)
 
 class SkinManager(QMainWindow):
 
-    def _init_ui(self): 
+    def _init_ui(self,headless=False): 
+
+        if(headless):
+            self.MainMenuBar=SystemMenuBar()
+            self._setup_MainMenuBar()
+            return
+
+        self._skin_events=SkinEvents()
+
         _ui_xml_path = os.path.join(os.path.dirname(sys.modules['__main__'].__file__), f"skins/{self.config["skin"]}")
 
-        self._engine = UIEngine(context=self, default_spacing=0, default_margin=0)
+        self._engine = UIEngine(events=self._skin_events,context=self, default_spacing=0, default_margin=0)
         container = self._engine.build_file(_ui_xml_path)
 
 
@@ -764,13 +820,8 @@ class SkinManager(QMainWindow):
         #self.next_button         = self.ui["next_button"]
         #self.restart_button      = self.ui["restart_button"]
         self.mode_button         = self.ui["mode_button"]
-        self.playlistBox         = self.ui["playlistBox"]
         self.MainMenuBar         = self.ui["MainMenuBar"]
 
-        if not(self.ui.get("playlist_table")): 
-            self.table = self.ui["table"] #!!! legacy БУДЕТ УБРАНО В 6.1.1 исправьте кастомные скины!!!
-        else:
-            self.table = self.ui["playlist_table"]
 
         self._setup_MainMenuBar()
 
@@ -809,10 +860,11 @@ class SkinManager(QMainWindow):
         self.set_cover_placeholder()
 
 
-        self.mode_button.setIcon(QIcon(self.PLAY_MODES_icons[self.play_mode_index]))
+        self.mode_button.setIcon(QIcon(self.PLAY_MODES_icons[self.playlistManager.play_mode_index]))
 
         # ── Дополнительный connect для url_input (returnPressed) ──────────
-        self.url_input.returnPressed.connect(self.add_url)
+        if(self.ui.get("url_input")):
+            self.ui["url_input"].returnPressed.connect(self.add_url)
 
         # ── Донастройка volume_slider ─────────────────────────────────────
         self.volume_slider.valueChanged.connect(
@@ -830,37 +882,43 @@ class SkinManager(QMainWindow):
         self.position_slider.sliderMoved.connect(self.on_seek_preview)
 
         # ── Донастройка таблицы ───────────────────────────────────────────
-        self.table.playlist = self.playlist
-        self.table.setColumnCount(2)
-        self.table.setHorizontalHeaderLabels(["Track", "Length"])
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().hide()
-        self.table.verticalHeader().hide()
-        self.table.setShowGrid(False)
-        self.table.setAlternatingRowColors(False)
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.table.cellDoubleClicked.connect(lambda row, _col: self.play_index(row))
-        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.table.customContextMenuRequested.connect(self.show_playlist_menu)
-        self.table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
-        self.table.verticalScrollBar().setSingleStep(1)
-        self.table.viewport().installEventFilter(self)
-        QScroller.grabGesture(self.table.viewport(), QScroller.LeftMouseButtonGesture)
 
-        scroller = QScroller.scroller(self.table.viewport())
-        props = QScrollerProperties()
-        props.setScrollMetric(QScrollerProperties.DragStartDistance, 0.004)
-        props.setScrollMetric(QScrollerProperties.DragVelocitySmoothingFactor, 0.6) # Сделали чуть отзывчивее
-        props.setScrollMetric(QScrollerProperties.ScrollingCurve, QEasingCurve(QEasingCurve.OutCubic))
-        scroller.setScrollerProperties(props)
+        self.table = self.ui.get("playlist_table")
+        if(self.table):
+            self.playlistManager.link_playlistWidget_to_manager(self.table)
+            self.table.setColumnCount(2)
+            self.table.setHorizontalHeaderLabels(["Track", "Length"])
+            self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+            self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+            self.table.horizontalHeader().hide()
+            self.table.verticalHeader().hide()
+            self.table.setShowGrid(False)
+            self.table.setAlternatingRowColors(False)
+            self.table.setSelectionBehavior(QTableWidget.SelectRows)
+            self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+            self.table.cellDoubleClicked.connect(lambda row, _col: self.play_index(row))
+            self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+            self.table.customContextMenuRequested.connect(self.show_playlist_menu)
+            self.table.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+            self.table.verticalScrollBar().setSingleStep(1)
+            self.table.viewport().installEventFilter(self)
+            QScroller.grabGesture(self.table.viewport(), QScroller.LeftMouseButtonGesture)
+
+            scroller = QScroller.scroller(self.table.viewport())
+            props = QScrollerProperties()
+            props.setScrollMetric(QScrollerProperties.DragStartDistance, 0.004)
+            props.setScrollMetric(QScrollerProperties.DragVelocitySmoothingFactor, 0.6) # Сделали чуть отзывчивее
+            props.setScrollMetric(QScrollerProperties.ScrollingCurve, QEasingCurve(QEasingCurve.OutCubic))
+            scroller.setScrollerProperties(props)
 
         # ── Политика размера playlistBox ──────────────────────────────────
-        self.playlistBox.setMinimumHeight(0)
-        sp = self.playlistBox.sizePolicy()
-        sp.setVerticalPolicy(QSizePolicy.Policy.Ignored)
-        self.playlistBox.setSizePolicy(sp)
+
+        if self.ui.get("playlistBox"):
+            
+            self.ui["playlistBox"].setMinimumHeight(0)
+            sp = self.ui["playlistBox"].sizePolicy()
+            sp.setVerticalPolicy(QSizePolicy.Policy.Ignored)
+            self.ui["playlistBox"].setSizePolicy(sp)
 
 
         self.setCentralWidget(container)
@@ -871,6 +929,12 @@ class SkinManager(QMainWindow):
             self.player.bufferProgressChanged.connect(self.on_buffer_progress_changed)
         except AttributeError:
             pass
+
+    def update_status_bar(self,status):
+        status_label=self.ui.get("status_label")
+
+        if(status_label):
+            status_label.setText(status)
 
     def _setup_MainMenuBar(self):
         file_menu = self.MainMenuBar.add_menu("Menu")
@@ -899,8 +963,6 @@ class SkinManager(QMainWindow):
         if not hasattr(self, "PluginMenu"):
             self.PluginMenu=self.MainMenuBar.add_submenu(setup_menu, "Plugins")
             self.PluginMenu.setParent(self, self.PluginMenu.windowFlags())
-
-            self.PlguinMenu=self.PluginMenu #!!! legacy БУДЕТ УБРАНО В 6.1.1 исправьте кастомные скины!!!
         else:
             setup_menu.addMenu(self.PluginMenu)
 
@@ -936,6 +998,9 @@ class SkinManager(QMainWindow):
             cover_background.set_new_image(QPixmap("resources/MSMPwaveBg.png"))
         if(cover_label):
             cover_label.set_new_image(QPixmap("resources/MSMPwave.png"))
+
+        self._skin_events.on_update_current_cover.emit("resources/MSMPwave.png")
+        self._skin_events.on_update_current_background.emit("resources/MSMPwaveBg.png")
 
 
     def set_metaData(self,time_possition=None,time_end=None,track_title=None,artist=None,album=None):
@@ -982,25 +1047,34 @@ class SkinManager(QMainWindow):
 
         # Если вы добовляете какое-то действие связанное с интерфейсом и его работой. Делайте отключение здесь!
 
-        current_index=self.table.current_index
+        current_index=self.playlistManager.current_index
+
+        self._skin_events.on_update_current_cover.disconnect()
+        self._skin_events.on_update_current_background.disconnect()
+
 
         if(self.visualizer_window):
             self.audio_buffer_output.audioBufferReceived.disconnect(self.on_audio_buffer_received) # пример прямо здесь
 
         self._init_ui() 
         self.refresh_table()
-        self.table.current_index=current_index
         if current_index is not None:
-            self.update_current_metadata(self.playlist[self.table.current_index])
+            self.update_current_metadata(self.playlistManager.playlist[self.playlistManager.current_index])
             self.table.apply_row_style(current_index)
 
             if isinstance(self.ui.get("position_slider"), WaveformSeekBar):
-                if not self.playlist[self.table.current_index].waveform == []:
-                    self.position_slider.set_waveform(self.playlist[self.table.current_index].waveform)
+                if not self.playlistManager.playlist[self.playlistManager.current_index].waveform == []:
+                    self.position_slider.set_waveform(self.playlistManager.playlist[self.playlistManager.current_index].waveform)
                 else:
-                    self.request_waveform_generation(self.table.current_index)
+                    self.request_waveform_generation(self.playlistManager.current_index)
             self.position_slider.setRange(0, max(0, self.player.duration()))
             self.update_buffer_progress(0.0)
+
+        if (self.ui.get("volume_slider")):
+            self.volume_slider.blockSignals(True)
+            self.volume_slider.setValue(round(self.audio_output.volume() * 100))
+            self.volume_slider.blockSignals(False)
+
             
         self.events.on_skin_changed.emit(self.config["skin"])
 

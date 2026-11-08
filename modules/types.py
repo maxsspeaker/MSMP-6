@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from PySide6.QtCore import QObject, Signal,QRunnable
+from PySide6.QtCore import QObject, Signal,QRunnable,QEvent
 from typing import Optional
 
 
@@ -19,6 +19,7 @@ class PlaylistItem:
     media_type: str = "audio"
     waveform: list[float] = field(default_factory=list)
     waveform_ready: bool = False
+    id: str = ""
 
 
 
@@ -39,7 +40,21 @@ class PlayerEvents(QObject):
     on_playlist_saved = Signal(str, list)      # Передаем путь к плейлисту (str) и кол-во треков (int)
     
     # Жизненный цикл программы
+    on_app_loading_finished = Signal()         # Программа Загрузилась
     on_app_closing = Signal()                  # Программа закрывается 
+    on_app_resized = Signal(object)
+
+class SkinEvents(QObject):
+    on_update_current_cover = Signal(object)  # Обновление текущей картинки альбома
+    on_update_current_background = Signal(object)  # Обновление текущего фона
+
+
+class PlaylistSignals(QObject):
+    resolved = Signal(object, object,int)
+    parsed = Signal(int, object, str)
+    failed = Signal(object, str, str,bool)
+    cleared = Signal()
+
 
 
 class CustomAudioResolver:

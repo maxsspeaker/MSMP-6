@@ -1,13 +1,16 @@
 import random,hashlib
 import os,sys
+
 from PySide6.QtWidgets import (
-    QApplication, QWidget, QPushButton, QVBoxLayout,QTableWidget, QProgressBar,
-    QHBoxLayout, QGraphicsOpacityEffect, QLabel, QGraphicsBlurEffect,QComboBox,QFrame,QStyleOptionViewItem,QListView,QStyledItemDelegate, QStyle,QMenu, QStyleOption,QTableWidgetItem,QAbstractItemView,QSizePolicy
+    QApplication, QWidget, QPushButton, QVBoxLayout,QTableWidget, QProgressBar,QGraphicsScene,QScrollBar,
+    QHBoxLayout, QGraphicsOpacityEffect, QLabel, QGraphicsBlurEffect,QComboBox,QFrame,QStyleOptionViewItem,QListView,QStyledItemDelegate,QSizePolicy, QStyle,QMenu, QStyleOption,QTableWidgetItem,QAbstractItemView,QSizePolicy
 )
 from PySide6.QtGui import QColor,QPixmap, QPainter, QLinearGradient, QImage,QPalette, QPen, QBrush,QAction,QFont,QPalette
-from PySide6.QtCore import QPropertyAnimation, QRect, QEasingCurve, Qt, Signal,QObject, QProcess,QParallelAnimationGroup,QSize, Slot,QPersistentModelIndex,Property
+from PySide6.QtCore import QEvent,QRectF,QPropertyAnimation, QRect, QEasingCurve, Qt, Signal,QObject, QProcess,QParallelAnimationGroup,QSize, Slot,QPersistentModelIndex,Property,QTimer
 from PySide6.QtMultimedia import QAudioOutput, QMediaDevices, QMediaPlayer,QAudioBufferOutput, QAudioDevice
-from modules.types import PlaylistItem
+
+from .types import PlaylistItem,PlaylistSignals
+from . import extractors
 import __main__ 
 import re
 import subprocess
@@ -15,19 +18,46 @@ import shutil
 import json,yaml
 import numpy as np
 import queue
+from typing import Optional
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 class GradientImageLabel(QLabel):
-    """Супер пупер навороченое отображение картинки, спиженный с моего Minecraft лаунчера"""
-    def __init__(self, parent=None,gradient:list = [],blur_effect:int = 0):
+    # Добавлен параметр glass_tint (по умолчанию 0 - никакого затенения)
+    def __init__(self, parent=None, gradient: list = None, blur_effect: int = 0, background_mode: bool = False, glass_mode: bool = False, glass_tint: int = 0):
         super().__init__(parent)
         self.original_pixmap = QPixmap()
-        # ОТКЛЮЧАЕМ стандартное искажающее растягивание Qt
         self.setScaledContents(False) 
 
-        self.blur_effect = QGraphicsBlurEffect()
-        self.blur_effect.setBlurRadius(blur_effect)
-        self.setGraphicsEffect(self.blur_effect)
-        self.gradient=gradient
+        self.gradient = gradient if gradient is not None else []
+        self.background_mode = background_mode
+        self._is_subscribed = False 
+        
+        self.glass_mode = glass_mode
+        self.blur_radius = blur_effect
+        self.glass_tint = glass_tint # Сохраняем уровень затенения
+
+        if self.glass_mode:
+            self.noise_texture = self._generate_noise(128, 128)
+        else:
+            self.blur_effect = QGraphicsBlurEffect()
+            self.blur_effect.setBlurRadius(self.blur_radius)
+            self.setGraphicsEffect(self.blur_effect)
+
+    def _generate_noise(self, w, h):
+        """Генерация текстуры индустриального точечного шума"""
+        img = QImage(w, h, QImage.Format.Format_ARGB32)
+        for y in range(h):
+            for x in range(w):
+                val = random.randint(0, 255)
+                img.setPixelColor(x, y, QColor(255, 255, 255, 12 if val > 127 else 5))
+        return QPixmap.fromImage(img)
+
+    def set_gradient(self, gradient: list = None):
+        self.gradient = gradient if gradient is not None else []
+        self.update_gradient_mask()
         
     def set_new_image(self, image_source):
         """Динамически принимает путь к файлу (str) или готовый QPixmap"""
@@ -42,61 +72,99 @@ class GradientImageLabel(QLabel):
         if self.original_pixmap.isNull():
             return
 
-        # Получаем текущие размеры самого виджета QLabel
         target_width = self.width()
         target_height = self.height()
         
         if target_width <= 0 or target_height <= 0:
             return
 
-        # 1. Конвертируем оригинал в QImage с поддержкой Альфа-канала
         src_image = self.original_pixmap.toImage().convertToFormat(QImage.Format.Format_ARGB32_Premultiplied)
         
-        # 2. РАСЧЕТ КАДРИРОВАНИЯ И ЦЕНТРИРОВАНИЯ (Аналог object-fit: cover)
         src_width = src_image.width()
         src_height = src_image.height()
         
-        # Вычисляем коэффициенты масштабирования
         scale_w = target_width / src_width
         scale_h = target_height / src_height
-        scale = max(scale_w, scale_h) # Берем максимальный, чтобы залить всю площадь
+        scale = max(scale_w, scale_h) 
         
-        # Размеры картинки после пропорционального масштабирования
         new_w = int(src_width * scale)
         new_h = int(src_height * scale)
         
-        # Масштабируем исходное изображение сглаженным алгоритмом
         scaled_image = src_image.scaled(new_w, new_h, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
         
-        # Находим координаты для вырезания центральной части (центрирование)
+        if self.glass_mode and self.blur_radius > 0:
+            temp_pixmap = QPixmap.fromImage(scaled_image)
+            scene = QGraphicsScene()
+            item = scene.addPixmap(temp_pixmap)
+            
+            blur = QGraphicsBlurEffect()
+            blur.setBlurRadius(self.blur_radius)
+            item.setGraphicsEffect(blur)
+            
+            blurred_pixmap = QPixmap(temp_pixmap.size())
+            blurred_pixmap.fill(Qt.GlobalColor.transparent)
+            
+            p_blur = QPainter(blurred_pixmap)
+            scene.render(p_blur, QRectF(blurred_pixmap.rect()), QRectF(temp_pixmap.rect()))
+            p_blur.end()
+            
+            scaled_image = blurred_pixmap.toImage()
+
         crop_x = (new_w - target_width) // 2
         crop_y = (new_h - target_height) // 2
-        
-        # Вырезаем кадр точно под размер QLabel
         cropped_image = scaled_image.copy(QRect(crop_x, crop_y, target_width, target_height))
 
-        # 3. НАЛОЖЕНИЕ ГРАДИЕНТА ПРОЗРАЧНОСТИ
-        # Создаем пустой холст строго под размер QLabel и заливаем прозрачностью
         result_image = QImage(target_width, target_height, QImage.Format.Format_ARGB32_Premultiplied)
         result_image.fill(QColor(0, 0, 0, 0)) 
         
         painter = QPainter(result_image)
-        # Рисуем уже отцентрированный и обрезанный кадр
         painter.drawImage(0, 0, cropped_image)
         
-        # Применяем маску прозрачности
-        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
-        
-        # Линейный градиент сверху вниз по размеру виджета
-        gradient = QLinearGradient(0, 0, 0, target_height)
-        for x in self.gradient:
-            gradient.setColorAt(x[0], x[1]) 
-        
-        painter.fillRect(result_image.rect(), gradient)
+        if self.glass_mode:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+            
+            # Тонировка применяется ТОЛЬКО если glass_tint больше 0.
+            if self.glass_tint > 0:
+                painter.fillRect(result_image.rect(), QColor(15, 15, 15, self.glass_tint))
+            
+            # Шероховатость (Шум)
+            painter.drawTiledPixmap(result_image.rect(), self.noise_texture)
+            
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        if self.gradient:
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
+            gradient_fill = QLinearGradient(0, 0, 0, target_height)
+            
+            for x in self.gradient:
+                if isinstance(x[1], QColor):
+                    gradient_fill.setColorAt(x[0], x[1])
+                else:
+                    gradient_fill.setColorAt(x[0], QColor(0, 0, 0, int(x[1] * 255)))
+            
+            painter.fillRect(result_image.rect(), gradient_fill)
+            
         painter.end()
         
-        # Выводим в QLabel
         self.setPixmap(QPixmap.fromImage(result_image))
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        
+        top_window = self.window()
+
+        if hasattr(top_window, "events"):
+            if not self._is_subscribed:
+                self.window().events.on_app_resized.connect(
+                    self.on_window_resize, 
+                    Qt.ConnectionType.UniqueConnection
+                )
+                self._is_subscribed = True
+                self.setGeometry(self.parentWidget().rect())
+
+    def on_window_resize(self, event):
+        if self.background_mode and self.parentWidget():
+            self.setGeometry(self.parentWidget().rect())
 
     def resizeEvent(self, event):
         """При ресайзе картинка автоматически перекадрируется и центрируется заново"""
@@ -104,6 +172,92 @@ class GradientImageLabel(QLabel):
         self.update_gradient_mask()
 
 
+class MarqueeLabel(QLabel):
+    def __init__(self, parent_or_text=None, parent=None, **kwargs):
+        # 1. Распознаем аргументы: текст это или родительский виджет
+        if isinstance(parent_or_text, str):
+            text = parent_or_text
+            actual_parent = parent
+        else:
+            text = ""
+            actual_parent = parent_or_text
+            
+        # 2. Перехватываем text из именованных аргументов (если передано text="...")
+        if 'text' in kwargs:
+            text = kwargs.pop('text')
+
+        # Инициализируем оригинальный QLabel пустой строкой
+        super().__init__("", actual_parent, **kwargs)
+        
+        # Надежно сохраняем текст в виде строки
+        self._real_text = str(text) if text else ""
+        self._offset = 0
+        self._spacing = 30
+        self._speed = 1
+        
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._update_scroll)
+        self._timer.start(20)
+
+    def text(self):
+        return self._real_text
+
+    def setText(self, text):
+        # На всякий случай приводим любой входной текст к строке
+        self._real_text = str(text) if text is not None else ""
+        self._offset = 0
+        self.update()
+
+    def minimumSizeHint(self):
+        base_size = super().minimumSizeHint()
+        return QSize(1, base_size.height())
+
+    def sizeHint(self):
+        base_size = super().sizeHint()
+        return QSize(100, base_size.height())
+
+    def _update_scroll(self):
+        if not self._real_text:
+            return
+            
+        fm = self.fontMetrics()
+        text_width = fm.horizontalAdvance(self._real_text)
+        content_width = self.contentsRect().width()
+        
+        if text_width > content_width:
+            self._offset -= self._speed
+            if abs(self._offset) >= text_width + self._spacing:
+                self._offset = 0
+            self.update()
+        else:
+            self._offset = 0
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        
+        if not self._real_text:
+            return
+
+        painter = QPainter(self)
+        painter.setPen(self.palette().color(QPalette.WindowText))
+        
+        rect = self.contentsRect()
+        painter.setClipRect(rect)
+
+        fm = self.fontMetrics()
+        text_width = fm.horizontalAdvance(self._real_text)
+
+        if text_width > rect.width():
+            rect1 = QRect(rect.left() + self._offset, rect.top(), text_width, rect.height())
+            painter.drawText(rect1, Qt.AlignVCenter | Qt.AlignLeft, self._real_text)
+
+            rect2 = QRect(rect.left() + self._offset + text_width + self._spacing, rect.top(), text_width, rect.height())
+            painter.drawText(rect2, Qt.AlignVCenter | Qt.AlignLeft, self._real_text)
+        else:
+            painter.drawText(rect, Qt.AlignVCenter | Qt.AlignLeft, self._real_text)
+            
 class AudioController():
 
     def _init_player(self):
@@ -147,6 +301,269 @@ class AudioController():
         else:
             self.audio_output.setDevice(self.current_device)
 
+
+class PlaylistManager():
+    def __init__(self,main_window,thread_pool):
+        self.main_window=main_window
+
+        self.playlist: list[PlaylistItem] = []
+        self.resolve_autoplay = None
+        self.play_mode_index = 0
+        self.playlist_title = "MSMP6 Playlist"
+        self.playlist_image_url = "https://msmp.maxsspeaker.space/static/img/Missing.png"
+        self.current_index = 0
+        self.playlist: list[PlaylistItem] = []
+        self.waveform_cache=None
+
+        self.resolverManager = extractors.resolverControler(thread_pool)
+
+        self._resolve_signals = extractors.ResolveSignals()
+        self._resolve_signals.resolved.connect(self.on_resolved)
+        self._resolve_signals.failed.connect(self.on_resolve_failed)
+
+        self._resolve_signals.parsed.connect(self.on_jam_playlist_parsed)
+
+        self.events = PlaylistSignals()
+
+        self.table=None
+
+    def on_resolved(self, index: int, item: PlaylistItem) -> None:
+        self.resolverManager.resolving_indexes.pop(index,None)
+        if(self.table):
+            index=self.table.get_dynamic_item(index)
+            resolve_autoplay=self.table.get_dynamic_item(self.resolve_autoplay)
+        else:
+            resolve_autoplay=self.resolve_autoplay
+
+        if index is None:
+            return
+        if index < 0 or index >= len(self.playlist):
+            return
+
+        if not item.page_url==self.playlist[index].page_url:
+            return
+
+        if self.waveform_cache:
+            cached_waveform = self.waveform_cache.get(item.page_url)
+            if cached_waveform:
+                item.waveform = cached_waveform
+                item.waveform_ready = True
+
+        self.playlist[index] = item
+        if(self.table):
+            self.table.setItemLoading(index,False)
+            self.table.update_row(index, item)
+
+        self.events.resolved.emit(index, item,resolve_autoplay)
+
+
+    def on_resolve_failed(self,index: Optional[int],error: str,details: str = "") -> None:
+        self.resolverManager.resolving_indexes.pop(index,None)
+        if(self.table):
+            index=self.table.get_dynamic_item(index)
+            resolve_autoplay=self.table.get_dynamic_item(self.resolve_autoplay)
+        else:
+            resolve_autoplay=self.resolve_autoplay
+        if not(index==None):
+            if(self.table):
+                self.table.setItemLoading(index,False)
+            if 0 <= index < len(self.playlist):
+                item = self.playlist[index]
+                item.stream_url = ""
+                item.load_error = error
+                item.unavailable = True
+                if item.title == "Loading...":
+                    item.title = "Video unavailable" if item.unavailable else "Resolve failed"
+                if(self.table):
+                    self.table.update_row(index, item)
+                title = item.page_url
+            else:
+                title = "item"
+
+        message = f"yt-dlp failed: {error}"
+        console_details = details or message
+        print(console_details, file=sys.stderr, flush=True)
+        logger.error("%s\n%s", message, console_details)
+
+        resolve_autoplay=False
+
+        if not(index==None):
+            if(index==self.resolve_autoplay):
+                resolve_autoplay=True
+                self.resolve_autoplay=None
+
+        self.events.failed.emit(index,error,details,resolve_autoplay)
+
+
+
+    def on_jam_playlist_parsed(self,index: Optional[int],items: object,playlist_title: str,) -> None:
+        if not isinstance(items, list) or not items:
+            self.events.parsed.emit(index,items,playlist_title)
+            return
+
+        parsed_items = [item for item in items if isinstance(item, PlaylistItem)]
+        if not parsed_items:
+            self.events.parsed.emit(index,items,playlist_title)
+            return
+
+        self.events.cleared.emit()
+
+        self.playlist_title = playlist_title or "Jam playlist"
+        self.playlist = parsed_items
+        self.current_index = None
+        self.resolverManager.clear()
+        self.resolve_autoplay = None
+        self.refresh_table()
+
+        self.events.parsed.emit(index,items,playlist_title)
+
+
+    def link_playlistWidget_to_manager(self,table):
+        self.table=table
+
+        self.table.playlistManager=self
+        self.refresh_table()
+
+    def to_msmp_playlist(self) -> dict:
+        return {
+            "title": self.playlist_title,
+            "ImgUrl": self.playlist_image_url,
+            "playlist": [self.to_msmp_track(item) for item in self.playlist],
+        }
+
+    def save_playlist(self,path):
+        data = self.to_msmp_playlist()
+        with open(path, "w", encoding="utf-8") as file:
+            json.dump(data, file, ensure_ascii=False, indent=2)
+        self.main_window.update_status_bar(f"Playlist saved: {path}")
+        self.main_window.events.on_playlist_saved.emit(path,self.playlist)
+
+
+    def load_playlist(self,path=None,isautosave=False) -> None:
+        with open(path, "r", encoding="utf-8") as file:
+            data = json.load(file)
+
+        self.current_index = None
+        self.playlist = load_playlist_data(data)
+
+        self.playlist_title = str(data.get("title") or "MSMP5 Playlist")
+
+        self.playlist_image_url = str(
+            data.get("ImgUrl")
+            or data.get("img_url")
+            or "https://msmp.maxsspeaker.space/static/img/Missing.png"
+        )
+
+        self.refresh_table()
+        if(self.table):
+            if(isautosave):
+                QTimer.singleShot(0, lambda: self.table.verticalScrollBar().setValue(data["ScrollBarState"]))
+            else:
+                QTimer.singleShot(0, lambda: self.table.verticalScrollBar().setValue(0))
+
+        self.main_window.events.on_playlist_opened.emit(path,self.playlist)
+
+    def refresh_table(self) -> None:
+        if(self.table):
+            self.table.clearPlaylistView()
+            self.table.setPlaylist(self.playlist)
+
+    @staticmethod
+    def to_msmp_track(item: PlaylistItem) -> dict:
+        return {
+            "ID": item.source_id,
+            "name": item.title,
+            "uploader": item.uploader,
+            "album": item.album,
+            "artwork_url": item.artwork_url,
+            "duration": item.duration,
+            "url": item.page_url,
+            "Publis": item.publis,
+            "Unavailable": item.unavailable,
+            "load_error": item.load_error,
+        }
+
+    def autosave(self):
+        data = self.to_msmp_playlist()
+        if(self.table):
+            data["ScrollBarState"]=self.table.verticalScrollBar().value()
+        else:
+            data["ScrollBarState"]=0
+
+        try:
+            with open(os.path.join(LocalSaveDir(),"autosave.plmsmpsbox"), "w", encoding="utf-8") as file:
+                json.dump(data, file, ensure_ascii=False, indent=2)
+        except OSError as exc:
+            print(exc)
+
+
+    def add_url_value(self, url: str, auto_play: bool = False,source_id="youtube",type="audio") -> None:
+        row = len(self.playlist)
+        self.playlist.append(PlaylistItem(page_url=url,source_id=source_id))
+        if(self.table):
+            self.table.insertRow(row)
+            self.table.update_row(row, self.playlist[row])
+        self.main_window.update_status_bar("Resolving stream...")
+        self.main_window.emit_mpris_properties_changed("org.mpris.MediaPlayer2.Player", {
+            "CanGoNext": bool(self.playlist),
+            "CanGoPrevious": bool(self.playlist),
+            "CanPlay": bool(self.playlist),
+        })
+        self.resolve_item(row, auto_play=auto_play,type=type)
+
+
+    def resolve_item(self, index: int, auto_play: bool = False,type="audio") -> None:
+        if index < 0 or index >= len(self.playlist):
+            return
+
+        if(auto_play):
+            if(self.table):
+                self.resolve_autoplay = self.table.link_dynamic_item(index)
+            else:
+                self.resolve_autoplay = index
+
+        if(self.table):
+            if self.resolverManager.resolving_indexes.get(self.table.link_dynamic_item(index)):
+                return
+        else:
+            if self.resolverManager.resolving_indexes.get(index):
+                return
+
+        if(type=="audio" or type=="video"):
+            local_audio=self.main_window.fpodManager.get_local_audio(self.playlist[index])
+            if(local_audio):
+                self.playlist[index].stream_url=local_audio
+                if(auto_play):
+                    self.main_window.start_playback(index)
+                return
+
+
+        if(self.table):
+            self.table.setItemLoading(index,True)
+            link_index=self.table.link_dynamic_item(index)
+        else:
+            link_index=index
+
+
+        self.resolverManager.addTask(link_index,self.main_window.plugin_loader.find_resolver(
+            link_index,
+            self.playlist[index],
+            self._resolve_signals,
+            self.main_window.config["cookies"]["browser"],
+            proxy=self.main_window.proxy.get(),
+            type=type
+        ))
+
+    def clear_playlist(self) -> None:
+        self.playlist.clear()
+        self.current_index = None
+        self.playlist_title = "MSMP6 Playlist"
+        self.resolverManager.clear()
+
+        if(self.table):
+            self.table.clearPlaylistView()
+
+        self.events.cleared.emit()
 
 class LoadingOverlay(QWidget):
     """Виджет-оверлей, который будет накладываться поверх строки"""
@@ -202,6 +619,23 @@ class OverlaySelectionDelegate(QStyledItemDelegate):
         style = widget.style() if widget else QApplication.style()
         style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, widget)
 
+
+class ScrollBarHoverFilter(QObject):
+    def eventFilter(self, obj, event):
+        if event.type() in (QEvent.Enter, QEvent.Leave):
+            hovered = event.type() == QEvent.Enter
+
+            if obj.property("barHovered") != hovered:
+                obj.setProperty("barHovered", hovered)
+
+                style = obj.style()
+                style.unpolish(obj)
+                style.polish(obj)
+                obj.update()
+
+        return False
+
+
 class PlaylistWidget(QTableWidget):
     """Кастомная таблица с поддержкой блокировки строк"""
     def __init__(self, rows=None, cols=None, parent=None,rowHeight:int = 44,inlineAudio: bool = False):
@@ -214,14 +648,15 @@ class PlaylistWidget(QTableWidget):
         self._mem_to_safe_id = {} # id памяти -> безопасный маленький ID
         self._item_row_map = {}
 
+        self.playlistManager = None
+
         self.inlineAudio=inlineAudio # 12
-        self.rowHeight=rowHeight #44
+        self.DefalutRowHeight=rowHeight #44
 
         self.verticalScrollBar().valueChanged.connect(self.update_overlays_position)
         self.horizontalScrollBar().valueChanged.connect(self.update_overlays_position)
 
         self.playlist = []
-        self.current_index: Optional[int] = None
 
         self._treak_color_is_current = QColor(palette.color(QPalette.ColorRole.HighlightedText))
         self._treak_color_unavailable = palette.color(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text) # "#5f6368"
@@ -241,6 +676,20 @@ class PlaylistWidget(QTableWidget):
         self.setAcceptDrops(True)
         self.setDropIndicatorShown(True)
         self.setDragDropMode(QAbstractItemView.InternalMove)
+
+        #self.setVerticalScrollBar(
+        #    QScrollBar(Qt.Orientation.Vertical)
+        #)
+
+
+        #self.bar = self.verticalScrollBar()
+
+        #self._scrollbar_hover_filter = ScrollBarHoverFilter(self)
+        #self.verticalScrollBar().installEventFilter(
+        #    self._scrollbar_hover_filter
+        #)
+
+
 
 
     @Property(QColor)
@@ -312,8 +761,8 @@ class PlaylistWidget(QTableWidget):
             self.insertRow(row)
             self.update_row(row, item)
 
-        if self.current_index is not None and self.current_index < len(self.playlist):
-            self.selectRow(self.current_index)
+        if self.playlistManager.current_index is not None and self.playlistManager.current_index < len(self.playlist):
+            self.selectRow(self.playlistManager.current_index)
 
     def mouseDoubleClickEvent(self, event):
         # Получаем элемент под курсором
@@ -349,7 +798,7 @@ class PlaylistWidget(QTableWidget):
         
         self.setItem(row, 0, track_item)
         self.setItem(row, 1, length_item)
-        self.setRowHeight(row, self.rowHeight)
+        self.setRowHeight(row, self.DefalutRowHeight)
         self.apply_row_style(row)
 
     def apply_row_style(self, row: int) -> None:
@@ -357,7 +806,7 @@ class PlaylistWidget(QTableWidget):
             return
 
         item = self.playlist[row]
-        is_current = row == self.current_index
+        is_current = row == self.playlistManager.current_index
         if is_current:
             background = QBrush(self._treak_bg_is_current)
         elif item.unavailable:
@@ -521,8 +970,8 @@ class PlaylistWidget(QTableWidget):
                 return old_row + 1
             return old_row
 
-        if self.current_index is not None:
-            self.current_index = remap(self.current_index)
+        if self.playlistManager.current_index is not None:
+            self.playlistManager.current_index = remap(self.playlistManager.current_index)
 
         if self.overlays:
             self.overlays = {remap(row): ov for row, ov in self.overlays.items()}
@@ -582,11 +1031,11 @@ class PlaylistWidget(QTableWidget):
             self._item_row_map[item_key] = r
 
         # 6. Корректируем индекс текущего воспроизводимого трека
-        if self.current_index is not None:
-            if self.current_index == row:
-                self.current_index = None  # Воспроизводимый трек был удален
-            elif self.current_index > row:
-                self.current_index -= 1  # Трек сдвинулся выше
+        if self.playlistManager.current_index is not None:
+            if self.playlistManager.current_index == row:
+                self.playlistManager.current_index = None  # Воспроизводимый трек был удален
+            elif self.playlistManager.current_index > row:
+                self.playlistManager.current_index -= 1  # Трек сдвинулся выше
 
         # 7. Пересчитываем визуальное положение оставшихся оверлеев
         self.update_overlays_position()
@@ -599,6 +1048,7 @@ class PlaylistWidget(QTableWidget):
         if hours:
             return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
         return f"{minutes}:{seconds:02d}"
+
 
 
 
@@ -712,7 +1162,7 @@ class FixedComboBox(QComboBox):
 
 class SystemMenuBar(QWidget):
     
-    def __init__(self, parent=None, bg_color="rgba(40, 40, 40, 255)"):
+    def __init__(self, parent=None, bg_color="rgba(40, 40, 40, 255)",headless=False):
         super().__init__(parent)
         self.setObjectName("MainMenuBar")
         
@@ -789,24 +1239,6 @@ class SystemMenuBar(QWidget):
 
 
 
-def from_playlist_entry(entry: dict) -> PlaylistItem:
-        page_url = entry.get("url") or entry.get("page_url")
-        if not page_url:
-            raise ValueError("Playlist entry has no url")
-
-        title = entry.get("name") or entry.get("title") or page_url
-        return PlaylistItem(
-            page_url=str(page_url),
-            title=str(title),
-            duration=int(entry.get("duration") or 0),
-            source_id=str(entry.get("ID") or entry.get("source_id") or "yt-dlp"),
-            uploader=str(entry.get("uploader") or ""),
-            album=str(entry.get("album") or ""),
-            artwork_url=str(entry.get("artwork_url") or entry.get("thumbnail") or ""),
-            publis=bool(entry.get("Publis") or entry.get("publis") or False),
-            unavailable=bool(entry.get("Unavailable") or entry.get("unavailable") or False),
-            load_error=str(entry.get("load_error") or ""),
-        )
 
 
 def LocalSaveDir():
@@ -844,3 +1276,34 @@ def LoadConfigYaml():
         return config
 
 #....
+
+
+def from_playlist_entry(entry: dict) -> PlaylistItem:
+        page_url = entry.get("url") or entry.get("page_url")
+        if not page_url:
+            raise ValueError("Playlist entry has no url")
+
+        title = entry.get("name") or entry.get("title") or page_url
+        return PlaylistItem(
+            page_url=str(page_url),
+            title=str(title),
+            duration=int(entry.get("duration") or 0),
+            source_id=str(entry.get("ID") or entry.get("source_id") or "yt-dlp"),
+            uploader=str(entry.get("uploader") or ""),
+            album=str(entry.get("album") or ""),
+            artwork_url=str(entry.get("artwork_url") or entry.get("thumbnail") or ""),
+            publis=bool(entry.get("Publis") or entry.get("publis") or False),
+            unavailable=bool(entry.get("Unavailable") or entry.get("unavailable") or False),
+            load_error=str(entry.get("load_error") or ""),
+        )
+
+def load_playlist_data(data) -> list[PlaylistItem]:
+    if isinstance(data, dict):
+        tracks = data.get("playlist")
+        if not isinstance(tracks, list):
+            raise ValueError("MSMP playlist must contain a playlist array")
+        return [from_playlist_entry(entry) for entry in tracks if isinstance(entry, dict)]
+    if isinstance(data, list):
+        return [from_playlist_entry(entry) for entry in data if isinstance(entry, dict)]
+
+    raise ValueError("Playlist file must contain a JSON object or array")

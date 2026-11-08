@@ -28,9 +28,9 @@
              flex="v" margin="0" spacing="0">
 
         <!-- Фоновое изображение — позиционируется вручную через resizeEvent -->
-        <gradientImageLabel id="cover_background"
-                            fixed-height="210" Align="AlignCenter"
-                            visible="true" blur_effect="16" nolayout="true"/>
+        <gradientImageLabel id="Better_cover_background"
+                            fixed-height="210" Align="AlignCenter" gradient="0.95,0,0,0,0; 0.6,0,0,0,200" glass_tint="100"
+                            visible="true" blur_effect="16" nolayout="true" background_mode="true" image="{current_background}" glass_mode="true"/>
 
         <systemmenubar id="MainMenuBar" visible="true"/>
 
@@ -49,13 +49,13 @@
                      stretch="1">
                 <!-- верхний распор -->
                 <qwidget stretch="1" />
-                <qlabel id="track_title_label" class="metaText"
+                <label id="track_title_label" class="metaText"
                         style="color:#f5f5f5; font-size:19px; font-weight:700;
                                margin:2px; margin-left:10px;" />
-                <qlabel id="artist_label" class="metaText"
+                <label id="artist_label" class="metaText"
                         style="color:#a8a8a8; font-size:14px;
                                margin:2px; margin-left:10px;" />
-                <qlabel id="album_label" class="metaText"
+                <label id="album_label" class="metaText"
                         style="color:#a8a8a8; font-size:14px;
                                margin:2px; margin-left:10px;" />
                 <!-- нижний распор -->
@@ -130,7 +130,7 @@
     </qwidget>
 
     <!-- Статусная строка -->
-    <qlabel id="status_label" class="statusText" text="Ready"
+    <label id="status_label" class="statusText" text="Ready"
             style="color:#8f8f8f; padding:5px 10px; border-top:1px solid #161616;" />
 
 </qwidget>

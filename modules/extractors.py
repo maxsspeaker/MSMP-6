@@ -233,7 +233,6 @@ class ResolveTask(QRunnable):
                 "--skip-download",
                 "--flat-playlist",
                 "--dump-single-json",
-                "--no-check-certificates",
                 *build_ytdlp_proxy_args(self.proxy),
                 "--retries",
                 "3",
@@ -278,6 +277,7 @@ class ResolveTask(QRunnable):
                 album=data.get("album") or "",
                 artwork_url=data.get("thumbnail") or "",
                 media_type=data.get("media_type") or "audio",
+                id=data.get("display_id")
             )
             if data.get('available_at'):
                 print(data.get('available_at')-time.time())
@@ -362,7 +362,6 @@ class ResolveTask(QRunnable):
                 "--playlist-items","0",
                 "--no-playlist",
                 "--dump-single-json",
-                "--no-check-certificates",
                 "--retries","3",
                 *build_ytdlp_browser_args(self.cookie_browser),
                 "--",
@@ -424,6 +423,7 @@ class ResolveTask(QRunnable):
                         uploader=str(entry.get("uploader") or entry.get("channel") or ""),
                         album=str(entry.get("album") or ""),
                         artwork_url=str(entry.get("thumbnail") or ""),
+                        id=data.get("display_id")
                     )
                 )
 

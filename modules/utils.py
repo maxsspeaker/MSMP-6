@@ -1,10 +1,14 @@
 import sys,os
 from PySide6.QtWidgets import QApplication, QDialog, QLabel, QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, QCheckBox
 
+from modules.other import LocalSaveDir
+from modules.AudioStatsDb import LocalAudioDb
+
+import ctypes
 
 
 class proxyManager():
-    """docstring for proxyManager"""
+    """Proxy Manager support for only Linux"""
     def __init__(self, config):
 
         if (config==None):
@@ -15,11 +19,17 @@ class proxyManager():
 
         self.proxyEnabled=config.get("enabled",False)
 
+        #window = InputDialog()
+
         #PROXYCHAINS_SOCKS5_HOST=127.0.0.1 PROXYCHAINS_SOCKS5_PORT=4321 proxychains 
 
 
     def restartWithProxy(self,mainwindow):
         if not(self.proxyEnabled):
+            return
+        if (sys.platform == "win32"):
+            self.proxyEnabled=False
+            print("[PROXY] Unsupported platform")
             return
         LD_PRELOAD=os.environ.get("LD_PRELOAD","")
 
@@ -112,18 +122,61 @@ class InputDialog(QDialog):
     def get_data(self):
         return self.hostAdress_line.text(), self.token_line.text()
 
+def fuck_mircoslop_trash_desing(window):
+    """fuck windows 11 slop trash desing! sharp are angles are fuking better"""
+    hwnd = int(window.winId())
+    
+    try:
+        # Dark window titlebar
+        dark_mode = ctypes.c_int(1)
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            hwnd,
+            20,
+            ctypes.byref(dark_mode),
+            ctypes.sizeof(dark_mode),
+        )
+        
+        # Sharp Angles
+        square_corners = ctypes.c_int(1)
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            hwnd,
+            33,
+            ctypes.byref(square_corners),
+            ctypes.sizeof(square_corners),
+        )
+        
+    except Exception as e:
+        print(f"Ошибка при применении стилей WinAPI: {e}")
+
+class FpodManager():
+    """Менеджер загрузки музыки, здесь должен код для синхронизации с настоящей желекой. Но у меня нету денег на сборку raspberry pi zero плеера("""
+    def __init__(self,main_window):
+        self.main_window=main_window
+
+        self.db = LocalAudioDb(db_name=os.path.join(LocalSaveDir(),"LocalMusic.db"))
+
+
+    def _fast_scan_folder(self,path):
+        with os.scandir(path) as entries:
+            return sum(1 for _ in entries)
 
 
 
-
-def main() -> int:
-
-    app = QApplication(sys.argv)
-
-    window = InputDialog()
-    window.show() 
-    return app.exec()
+    def get_local_audio(self,audio):
+        return None
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+class AirFoxManager():
+    """Менеджер умных колонок с MSMP FoxWave в режиме headless (code-name: WaveStation)"""
+    def __init__(self,main_window):
+        self.main_window=main_window
+
+    def scan_airfox(self):
+        pass
+
+    def connect(self,address):
+        pass
+
+    def disconnect(self):
+        pass
+
