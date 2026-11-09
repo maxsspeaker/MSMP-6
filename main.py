@@ -1420,7 +1420,8 @@ class PlayerWindow(SkinManager,AudioController):
         self.waveform_cache[item.page_url] = cleaned
 
         if index == self.playlistManager.current_index:
-            self.position_slider.set_waveform(cleaned)
+            if isinstance(self.position_slider, WaveformSeekBar):
+                self.position_slider.set_waveform(cleaned)
 
     def on_waveform_failed(self, index: int, error: str) -> None:
         self.waveform_generation_indexes.discard(index)

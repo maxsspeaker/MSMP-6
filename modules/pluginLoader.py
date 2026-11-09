@@ -5,6 +5,7 @@ import json
 import importlib
 import inspect
 import re
+import types
 from pathlib import Path
 
 from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, 
@@ -81,18 +82,47 @@ class PluginLoader:
 
                 if(self.config["plugins"].get(plugin_id)):
                     if os.path.exists(os.path.join(item_path, "index.py")):
-                        self._load_plugin_from_folder(item, context)
+                        self._load_plugin_from_folder(item_path, context)
 
-    def _load_plugin_from_folder(self, folder_name, context):
+
+    def _load_plugin_from_folder(self, folder_path, context):
         try:
+            folder_name = os.path.basename(os.path.normpath(folder_path))
 
-            # "plugins.hello_world_plugin.main_plugin"
-            module_path = f"{self.plugins_dir_name}.{folder_name}.index"
+            package_name = f"{self.plugins_dir_name}.{folder_name}"
+            safe_module_name = f"{package_name}.index"
             
-            module = importlib.import_module(module_path)
+            index_file_path = os.path.join(folder_path, "index.py")
+            
+            if not os.path.exists(index_file_path):
+                print(f"[PluginLoader] Missing {index_file_path}, skipping plugin")
+                return
 
+            # помогаем слепому найти свои файлы
+            if self.plugins_dir_name not in sys.modules:
+                base_pkg = types.ModuleType(self.plugins_dir_name)
+                base_pkg.__path__ = [os.path.dirname(folder_path)]
+                sys.modules[self.plugins_dir_name] = base_pkg
+                
+            if package_name not in sys.modules:
+                plugin_pkg = types.ModuleType(package_name)
+                plugin_pkg.__path__ = [folder_path] 
+                plugin_pkg.__package__ = package_name
+                sys.modules[package_name] = plugin_pkg
+
+            # загружаем сам плагин
+            spec = importlib.util.spec_from_file_location(safe_module_name, index_file_path)
+            if spec and spec.loader:
+                module = importlib.util.module_from_spec(spec)
+                module.__package__ = package_name 
+                sys.modules[safe_module_name] = module
+                spec.loader.exec_module(module)
+            else:
+                print(f"[PluginLoader] Failed to load spec for {folder_path}")
+                return
+
+            # добовляем контекста и запускаем awake плагина.
             for attribute_name in dir(module):
-                print(module)
                 attribute = getattr(module, attribute_name)
                 
                 if (inspect.isclass(attribute) and 
@@ -100,19 +130,20 @@ class PluginLoader:
                     attribute is not PluginBase):
                     
                     plugin_instance = attribute(context)
-                    if(hasattr(plugin_instance, 'awake_plugin')):
+                    
+                    if hasattr(plugin_instance, 'awake_plugin'):
                         plugin_instance.awake_plugin()
 
-                    if(hasattr(plugin_instance, 'extractor_plugin')):
+                    if hasattr(plugin_instance, 'extractor_plugin'):
                         self.extractor_plugins.append(plugin_instance.extractor_plugin())
                     
                     self.loaded_plugins.append(plugin_instance)
-                    print(f"✅ Загружен плагин: {folder_name}")
+                    print(f"[PluginLoader] Plugin loaded: {folder_name}")
                     return
-
+                    
         except Exception as e:
             details = traceback.format_exc()
-            print(f"Ошибка загрузки из папки {folder_name}: {details}")
+            print(f"[PluginLoader] error when awake plugin {folder_name}: {details}")
 
 
     def Source_resolver(self,url):
